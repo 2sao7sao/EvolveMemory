@@ -1,34 +1,65 @@
 # Adaptive Memory Engine
 
-## Goal
+Adaptive Memory Engine is a prototype memory system for conversational AI.
+Its goal is not to build a bigger transcript store. Its goal is to turn user
+dialogue into structured memory, decide what is worth keeping, and convert
+active memory into response guidance that makes the model answer in a way that
+fits the user.
 
-Adaptive Memory Engine prototypes a user-centric memory system for conversational AI.
-The system does not treat memory as a raw transcript archive. It turns dialogue
-into structured memory and then converts memory into a response policy that
-helps the model answer in a way that better fits the user.
+The core question is:
 
-The design centers on three questions:
+```text
+Given what we know about this user, how should the model respond right now?
+```
 
-1. What should be remembered
-2. How should it be remembered
-3. How should memory change the answer
+## Why This Exists
 
-## Core Principle
+Most memory systems stop at storage and retrieval. That is not enough for a
+personal assistant. Useful memory has to influence behavior:
 
-The key output is not a user profile document. It is a dynamic answering
-strategy:
+- what the model remembers
+- how long the memory remains valid
+- whether memories conflict or coexist
+- how a user can correct memory
+- which memories matter for the current query
+- how retrieved memory changes tone, structure, detail, empathy, and follow-up behavior
 
-- What tone should be used
-- How much detail should be given
-- Whether the answer should be conclusion-first or process-first
-- Whether the model should recommend, explore, or ask clarifying questions
-- How much empathy or efficiency should be injected
+This repository implements that end-to-end loop in a small, inspectable Python
+service.
+
+## System Flow
+
+```text
+dialogue turn
+  -> candidate memory extraction
+  -> write policy scoring
+  -> memory store update
+  -> profile inference
+  -> query-aware retrieval
+  -> response policy generation
+  -> model-ready prompt context
+```
+
+Memory is not pushed directly into the answer prompt. Relevant memories are
+first converted into a response policy such as:
+
+```json
+{
+  "tone": "direct_but_warm",
+  "detail_level": "low",
+  "structure": "answer_first_then_steps",
+  "decision_mode": "give_recommendation",
+  "pace": "medium",
+  "empathy_level": "high",
+  "followup_style": "clarify_when_needed"
+}
+```
 
 ## Memory Layers
 
-### 1. Events
+### Events
 
-Discrete things that happened to the user and can influence future context.
+Events describe things that happened and may shape future context.
 
 Examples:
 
@@ -38,63 +69,72 @@ Examples:
 - started preparing for an exam
 - recently began learning skiing
 
-Design notes:
+Events are time-sensitive. They often create or update states, and they are
+useful for follow-up support.
 
-- event memories are time-sensitive
-- event memories can create or update states
-- event memories are often the trigger for follow-up support
+### States
 
-### 2. States
+States describe what is true about the user now.
 
-Facts or conditions describing what the user is like now.
+State dynamics:
 
-States are split into three engineering layers:
+- `static`: stable facts, such as education level
+- `semi_static`: facts that change occasionally, such as relationship status or work status
+- `fluid`: short-lived context, such as being anxious, busy, or preparing for interviews
 
-- static: stable, low-frequency change
-- semi-static: changes occasionally
-- fluid: phase-based or short-lived
+Some states are mutually exclusive. Some can coexist. For example,
+`relationship_status=single` and `relationship_status=dating` should not both
+be active, while `interest_long_term=skiing` and `interest_short_term=fishing`
+can coexist.
 
-Examples:
+### Preferences
 
-- static: age band, education level
-- semi-static: relationship status, work status, city
-- fluid: busy this week, anxious recently, preparing for interviews
-
-State design rules:
-
-- some states are mutually exclusive
-- some states can coexist
-- fluid states should usually have a shorter lifetime
-
-### 3. Preferences
-
-How the user prefers to be served.
+Preferences describe how the user wants to be served.
 
 Examples:
 
-- prefers direct communication
-- wants step-by-step guidance
-- likes answer first
-- dislikes verbose explanations
-- wants strong recommendations instead of neutral framing
+- direct communication
+- concise answers
+- conclusion first
+- step-by-step explanation
+- fewer follow-up questions
+- stronger recommendations
 
-This layer is the most important short path from memory to answer quality.
+This is the shortest path from memory to better answers.
 
-### 4. Profile
+### Profile
 
-Profile is not a rigid label. It is a set of inferred dimensions with
-confidence scores and explicit evidence.
+Profile memory is inferred from dialogue and preference history. It is not a
+rigid label or personality type. It is a set of revisable dimensions with
+confidence and evidence.
 
-Recommended dimensions:
+Current profile dimensions include:
 
-- structure_preference
-- directness_preference
-- control_need
-- detail_preference
-- emotional_support_need
-- exploration_preference
+- `structure_preference_level`
+- `directness_preference_level`
+- `detail_tolerance`
+- `emotional_support_need`
+- `pace_preference`
 
-Profile should remain revisable. It is an inference layer, not a verdict.
+## Components
+
+| Component | File | Responsibility |
+| --- | --- | --- |
+| `MemoryItem` | `memory_system/schema.py` | Normalized memory record with confidence, validity, coexistence, and source metadata. |
+| `ResponsePolicy` | `memory_system/schema.py` | Compact answer-control object used by the model-facing layer. |
+| `MemoryAuditEvent` | `memory_system/schema.py` | Explains memory writes, merges, rejections, retirements, and corrections. |
+| `DialogueMemoryExtractor` | `memory_system/engine.py` | Rule-based Chinese dialogue extractor for the current prototype. |
+| `MemoryWriteEvaluator` | `memory_system/engine.py` | Scores candidate memories before persistence. |
+| `MemoryStore` | `memory_system/engine.py` | Applies active-memory, merge, retirement, correction, and audit rules. |
+| `ProfileInferencer` | `memory_system/engine.py` | Infers user profile dimensions from active states and preferences. |
+| `QueryMemoryRetriever` | `memory_system/engine.py` | Retrieves memories relevant to the current user query. |
+| `ResponsePolicyEngine` | `memory_system/engine.py` | Converts memory signals into response policy. |
+| `StructuredMemoryParser` | `memory_system/structured.py` | Parses LLM-produced JSON extraction payloads into `MemoryItem` objects. |
+| `PromptContextBuilder` | `memory_system/prompting.py` | Builds model-ready prompt context from relevant memory and policy. |
+| `DiskSessionRepository` | `memory_system/persistence.py` | Persists session memory and audit events to local JSON files. |
+| `SessionMemoryRuntime` | `memory_system/service.py` | Orchestrates extraction, scoring, storage, inference, retrieval, and prompt context. |
+| FastAPI app | `app.py` | Provides HTTP endpoints for integration. |
+| Demo CLI | `demo.py` | Runs the memory loop locally with sample turns. |
 
 ## Data Model
 
@@ -102,7 +142,6 @@ Each memory item uses a normalized schema:
 
 ```json
 {
-  "id": "mem_001",
   "type": "state",
   "key": "relationship_status",
   "value": "single",
@@ -113,209 +152,154 @@ Each memory item uses a normalized schema:
   "valid_to": null,
   "confirmed_by_user": true,
   "exclusive_group": "relationship_status",
-  "coexistence_rule": "mutually_exclusive"
+  "coexistence_rule": "mutually_exclusive",
+  "dynamics": "semi_static",
+  "tags": [],
+  "last_updated": "2026-04-16T09:00:00+08:00"
 }
 ```
 
-Required fields:
+Important fields:
 
-- `type`: `event`, `state`, `preference`, `profile`
+- `type`: `event`, `state`, `preference`, or `profile`
 - `key`: normalized semantic slot
 - `value`: normalized slot value
 - `confidence`: confidence in `[0, 1]`
-- `source`: where the memory came from
-- `evidence`: the text snippet or reason
-
-Recommended control fields:
-
-- `valid_from`
-- `valid_to`
-- `confirmed_by_user`
-- `exclusive_group`
-- `coexistence_rule`
-
-## State Machine Design
-
-Use state machines only for the slots that truly need them.
-
-### Mutually exclusive states
-
-Examples:
-
-- `relationship_status`: single, dating, married
-- `education_level`: associate, bachelor, master, phd
-- `communication_pace`: slow, medium, fast
-
-When a new active value enters the same exclusive group, the old value should
-be retired instead of deleted.
-
-### Coexisting states
-
-Examples:
-
-- `interests`: fishing, skiing, photography
-- `skills_in_progress`: interview_prep, english_learning
-- `response_opening` and `explanation_structure`: `answer_first` can coexist with `step_by_step`
-
-These should be stored as parallel memories rather than a single slot.
-
-### Lifetime rules
-
-- static states usually persist until contradicted
-- semi-static states persist until replaced
-- fluid states should have shorter validity windows or decay faster
-- profile dimensions should be recalculated when strong new evidence appears
+- `source`: turn, model, or correction source
+- `evidence`: text or reason supporting the memory
+- `valid_from` and `valid_to`: active time window
+- `exclusive_group`: conflict group for mutually exclusive memories
+- `coexistence_rule`: how the memory interacts with nearby memories
+- `dynamics`: stability class
 
 ## Write Policy
 
-Not everything should enter long-term memory.
+Not every extracted detail should become long-term memory. Candidate memories
+are scored before they are written:
 
-A simple write heuristic:
+```text
+memory_value = stability * reuse * personalization_gain * confidence
+```
 
-`memory_value = stability x reuse x personalization_gain x confidence`
+The current `MemoryWriteEvaluator` returns a `WriteDecision`:
 
-Only persist memories that are likely to matter later.
-The prototype now applies this policy in code through `MemoryWriteEvaluator`.
-Every extracted candidate receives a write decision with score, threshold, and
-factor breakdown before it is persisted.
+```json
+{
+  "should_write": true,
+  "score": 0.641,
+  "threshold": 0.16,
+  "reason": "passes write policy",
+  "factors": {
+    "stability": 0.92,
+    "reuse": 0.95,
+    "personalization_gain": 0.98,
+    "confidence": 0.75
+  }
+}
+```
 
-High-value candidates:
+High-value examples:
 
 - stable user facts
 - repeated preferences
 - major life events
-- ongoing work or emotional context that shapes current answers
+- active work or emotional context
+- guidance preferences that influence future answers
 
-Low-value candidates:
+Low-value examples:
 
 - one-off throwaway remarks
-- unstable guesses with weak evidence
-- details that do not affect future responses
+- weak guesses
+- details with low future reuse
+- transient facts that do not affect response quality
 
-## Retrieval and Usage
+## State Machine Rules
 
-The system should not dump all memory back into the prompt.
+The store uses active-time windows rather than deleting history.
 
-Instead:
+Mutually exclusive examples:
 
-1. retrieve only relevant memory for the current query
-2. aggregate signals into a response policy
-3. answer using the policy, not the raw memory list
+- `relationship_status`: `single`, `dating`, `married`
+- `education_level`: `associate`, `bachelor`, `master`, `phd`
+- `detail_preference`: `concise`, `detailed`
+- `response_opening`: `answer_first`
 
-Example response policy:
+Coexisting examples:
+
+- `interest_long_term`
+- `interest_short_term`
+- `response_opening=answer_first` with `explanation_structure=step_by_step`
+- multiple life events over time
+
+When a new memory enters the same exclusive group, the previous active memory is
+retired by setting `valid_to`. A memory is active only when `valid_to` is empty
+or later than the current timestamp.
+
+## Correction And Audit
+
+Users can explicitly correct or retire memory. Corrections are treated as
+high-authority writes and create audit events.
+
+Audit actions:
+
+- `write`: new memory persisted
+- `merge`: duplicate or equivalent memory merged
+- `reject`: candidate failed write policy
+- `retire`: previous memory made inactive
+- `correct`: user correction inserted
+
+This makes the memory system explainable. A caller can inspect not only what is
+remembered, but why it was remembered and what it replaced.
+
+## Structured LLM Extraction
+
+The rule extractor is intentionally small. Production systems should use an LLM
+to produce structured candidate memories, then pass them through the same write
+policy and store.
+
+Expected shape:
 
 ```json
 {
-  "tone": "direct_but_warm",
-  "detail_level": "medium",
-  "structure": "answer_first",
-  "decision_mode": "give_recommendation",
-  "pace": "fast",
-  "empathy_level": "moderate",
-  "followup_style": "only_when_blocked"
+  "memories": [
+    {
+      "type": "preference",
+      "key": "response_opening",
+      "value": "answer_first",
+      "confidence": 0.9,
+      "evidence": "先给结论",
+      "exclusive_group": "response_opening",
+      "coexistence_rule": "mutually_exclusive",
+      "dynamics": "not_applicable",
+      "tags": []
+    }
+  ]
 }
 ```
 
-## Architecture
+`StructuredMemoryParser` converts this payload into `MemoryItem` objects. The
+same write policy, audit, persistence, and retrieval layers then apply.
 
-The prototype splits the system into focused modules:
+## API
 
-1. `DialogueMemoryExtractor`
-   Converts raw dialogue into candidate memories.
-
-2. `MemoryStore`
-   Applies coexistence and exclusivity rules and keeps active memory.
-
-3. `ProfileInferencer`
-   Infers continuous user traits from accumulated evidence.
-
-4. `ResponsePolicyEngine`
-   Converts active memory into a response policy used by the model.
-
-5. `QueryMemoryRetriever`
-   Selects the subset of active memory that is relevant to the current query.
-
-6. `SessionMemoryRuntime`
-   Wraps ingest, inference, retrieval, and policy generation for one session.
-
-7. `DiskSessionRepository`
-   Persists session memories to disk so the system survives process restarts.
-
-8. `PromptContextBuilder`
-   Converts relevant memories and response policy into model-ready prompt context.
-
-9. `MemoryWriteEvaluator`
-   Scores candidate memories before persistence using stability, reuse,
-   personalization gain, and confidence.
-
-10. `StructuredMemoryParser`
-    Converts LLM-produced JSON memory extraction payloads into validated
-    `MemoryItem` objects.
-
-11. Memory correction and audit
-    Lets users correct or retire memory and records write, merge, retire,
-    reject, and correction events.
-
-## Prototype Scope
-
-This repository provides a local Python prototype that can:
-
-- extract candidate event, state, and preference memories from Chinese dialogue
-- parse structured LLM memory extraction payloads
-- score candidate memories before writing them
-- manage mutually exclusive and coexisting memory slots
-- support explicit user memory correction and retirement
-- keep an audit log of memory writes, merges, rejections, retirements, and corrections
-- infer profile dimensions from explicit preferences and recent states
-- retrieve only query-relevant memory before answer generation
-- generate a response policy
-- persist session memory to local disk
-- assemble a model-ready prompt context
-- serve the pipeline over FastAPI for local integration
-
-It is rule-based on purpose so the architecture can be inspected before a model
-driven extractor is introduced.
-
-## Run
-
-Run the built-in demo:
-
-```bash
-python3 demo.py
-```
-
-Run with custom turns:
-
-```bash
-python3 demo.py --turn "我29岁，硕士毕业，现在单身。" --turn "最近找工作很焦虑，回答直接一点，先给结论。"
-```
-
-Run tests:
-
-```bash
-python3 -m unittest discover -s tests -p 'test_*.py'
-```
-
-Run the local API service:
+Start the service:
 
 ```bash
 uvicorn app:app --reload
 ```
 
-Ingest a turn:
+Health check:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Ingest a raw dialogue turn:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/sessions/demo/ingest \
   -H 'Content-Type: application/json' \
   -d '{"text":"我29岁，硕士毕业，现在单身，最近在找工作。"}'
-```
-
-Query with relevant-memory retrieval:
-
-```bash
-curl -X POST http://127.0.0.1:8000/sessions/demo/query \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"给我一点求职建议，回答直接一点。"}'
 ```
 
 Ingest structured LLM extraction output:
@@ -326,6 +310,14 @@ curl -X POST http://127.0.0.1:8000/sessions/demo/ingest-structured \
   -d '{"payload":{"memories":[{"type":"preference","key":"response_opening","value":"answer_first","confidence":0.9,"evidence":"先给结论","exclusive_group":"response_opening"}]}}'
 ```
 
+Retrieve relevant memory and response policy:
+
+```bash
+curl -X POST http://127.0.0.1:8000/sessions/demo/query \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"给我一点求职建议，回答直接一点。"}'
+```
+
 Build model-ready prompt context:
 
 ```bash
@@ -334,10 +326,10 @@ curl -X POST http://127.0.0.1:8000/sessions/demo/prompt-context \
   -d '{"query":"给我一点求职建议，回答直接一点。"}'
 ```
 
-Session files are stored under:
+Inspect active memories:
 
 ```bash
-data/sessions/<session_id>.json
+curl http://127.0.0.1:8000/sessions/demo/memories
 ```
 
 Correct a memory:
@@ -348,15 +340,120 @@ curl -X POST http://127.0.0.1:8000/sessions/demo/memories/correct \
   -d '{"memory_type":"state","key":"relationship_status","value":"dating","evidence":"我刚才说错了，现在是恋爱中","dynamics":"semi_static"}'
 ```
 
+Retire a memory:
+
+```bash
+curl -X POST http://127.0.0.1:8000/sessions/demo/memories/retire \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"current_emotional_state","memory_type":"state","reason":"no longer current"}'
+```
+
 Read audit events:
 
 ```bash
 curl http://127.0.0.1:8000/sessions/demo/audit
 ```
 
-## Next Steps
+Reset a session:
 
-- connect `StructuredMemoryParser` to a production LLM extraction call
-- add semantic retrieval by embedding in addition to the current rule scorer
-- add memory decay and contradiction handling
-- add LLM-backed answer generation over prompt context
+```bash
+curl -X POST http://127.0.0.1:8000/sessions/demo/reset
+```
+
+## Local Development
+
+Install dependencies:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+Run the demo:
+
+```bash
+python3 demo.py
+```
+
+Run with custom turns:
+
+```bash
+python3 demo.py \
+  --turn "我29岁，硕士毕业，现在单身。" \
+  --turn "最近找工作很焦虑，回答直接一点，先给结论。"
+```
+
+Run tests:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py'
+```
+
+Session files are stored under:
+
+```bash
+data/sessions/<session_id>.json
+```
+
+Runtime session JSON is ignored by git.
+
+## Example Prompt Context
+
+`/prompt-context` returns a model-facing object with:
+
+- `system_prompt`
+- `relevant_memory_lines`
+- `response_policy`
+- `assembled_prompt`
+
+The assembled prompt is intentionally explicit:
+
+```text
+[System Guidance]
+Use the response policy as the main control layer.
+
+[Relevant User Memory]
+- work_status: job_seeking
+- response_opening: answer_first
+
+[Response Policy]
+- tone=direct_but_warm
+- structure=answer_first
+- decision_mode=give_recommendation
+
+[Current User Query]
+给我一点求职建议
+```
+
+## Current Limitations
+
+- The built-in raw dialogue extractor is rule-based and Chinese-first.
+- Retrieval is keyword and rule weighted, not embedding based.
+- Persistence is local JSON, not a database.
+- Profile inference is deterministic and narrow.
+- There is no production LLM call in this repository yet.
+- There is no authentication layer around the FastAPI service.
+
+These are deliberate prototype boundaries. The architecture keeps extraction,
+write policy, storage, retrieval, and prompt assembly separate so each layer can
+be upgraded independently.
+
+## Roadmap
+
+- Connect `StructuredMemoryParser` to a production LLM extraction call.
+- Add semantic retrieval with embeddings.
+- Add configurable decay policies by memory type and dynamics.
+- Add contradiction detection beyond exclusive groups.
+- Add a memory review UI for accepting, correcting, and retiring memories.
+- Add database-backed repositories.
+- Add policy-conditioned answer generation over `assembled_prompt`.
+- Add privacy controls for sensitive memory categories.
+
+## Repository Status
+
+This project is an early prototype. It is useful for design exploration,
+integration experiments, and validating the architecture of a personalized
+memory system. It is not yet a production-grade memory service.
+
+## License
+
+MIT License. See [LICENSE](LICENSE).
