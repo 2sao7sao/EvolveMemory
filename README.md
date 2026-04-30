@@ -1,8 +1,8 @@
-# New Memory System
+# Adaptive Memory Engine
 
 ## Goal
 
-This project prototypes a user-centric memory system for conversational AI.
+Adaptive Memory Engine prototypes a user-centric memory system for conversational AI.
 The system does not treat memory as a raw transcript archive. It turns dialogue
 into structured memory and then converts memory into a response policy that
 helps the model answer in a way that better fits the user.
@@ -15,8 +15,8 @@ The design centers on three questions:
 
 ## Core Principle
 
-The key output of the system is not a user profile document. It is a dynamic
-answering strategy:
+The key output is not a user profile document. It is a dynamic answering
+strategy:
 
 - What tone should be used
 - How much detail should be given
@@ -175,6 +175,9 @@ A simple write heuristic:
 `memory_value = stability x reuse x personalization_gain x confidence`
 
 Only persist memories that are likely to matter later.
+The prototype now applies this policy in code through `MemoryWriteEvaluator`.
+Every extracted candidate receives a write decision with score, threshold, and
+factor breakdown before it is persisted.
 
 High-value candidates:
 
@@ -215,7 +218,7 @@ Example response policy:
 
 ## Architecture
 
-The prototype is intentionally small and splits the system into four modules:
+The prototype splits the system into focused modules:
 
 1. `DialogueMemoryExtractor`
    Converts raw dialogue into candidate memories.
@@ -241,12 +244,28 @@ The prototype is intentionally small and splits the system into four modules:
 8. `PromptContextBuilder`
    Converts relevant memories and response policy into model-ready prompt context.
 
+9. `MemoryWriteEvaluator`
+   Scores candidate memories before persistence using stability, reuse,
+   personalization gain, and confidence.
+
+10. `StructuredMemoryParser`
+    Converts LLM-produced JSON memory extraction payloads into validated
+    `MemoryItem` objects.
+
+11. Memory correction and audit
+    Lets users correct or retire memory and records write, merge, retire,
+    reject, and correction events.
+
 ## Prototype Scope
 
 This repository provides a local Python prototype that can:
 
 - extract candidate event, state, and preference memories from Chinese dialogue
+- parse structured LLM memory extraction payloads
+- score candidate memories before writing them
 - manage mutually exclusive and coexisting memory slots
+- support explicit user memory correction and retirement
+- keep an audit log of memory writes, merges, rejections, retirements, and corrections
 - infer profile dimensions from explicit preferences and recent states
 - retrieve only query-relevant memory before answer generation
 - generate a response policy
@@ -299,6 +318,14 @@ curl -X POST http://127.0.0.1:8000/sessions/demo/query \
   -d '{"query":"给我一点求职建议，回答直接一点。"}'
 ```
 
+Ingest structured LLM extraction output:
+
+```bash
+curl -X POST http://127.0.0.1:8000/sessions/demo/ingest-structured \
+  -H 'Content-Type: application/json' \
+  -d '{"payload":{"memories":[{"type":"preference","key":"response_opening","value":"answer_first","confidence":0.9,"evidence":"先给结论","exclusive_group":"response_opening"}]}}'
+```
+
 Build model-ready prompt context:
 
 ```bash
@@ -313,10 +340,23 @@ Session files are stored under:
 data/sessions/<session_id>.json
 ```
 
+Correct a memory:
+
+```bash
+curl -X POST http://127.0.0.1:8000/sessions/demo/memories/correct \
+  -H 'Content-Type: application/json' \
+  -d '{"memory_type":"state","key":"relationship_status","value":"dating","evidence":"我刚才说错了，现在是恋爱中","dynamics":"semi_static"}'
+```
+
+Read audit events:
+
+```bash
+curl http://127.0.0.1:8000/sessions/demo/audit
+```
+
 ## Next Steps
 
-- add an LLM-backed extractor that outputs normalized memory candidates
-- add retrieval filtering by user query intent
+- connect `StructuredMemoryParser` to a production LLM extraction call
+- add semantic retrieval by embedding in addition to the current rule scorer
 - add memory decay and contradiction handling
-- add explicit user correction and memory audit logs
 - add LLM-backed answer generation over prompt context

@@ -20,6 +20,14 @@ class StateDynamics(str, Enum):
     NOT_APPLICABLE = "not_applicable"
 
 
+class AuditAction(str, Enum):
+    WRITE = "write"
+    MERGE = "merge"
+    RETIRE = "retire"
+    REJECT = "reject"
+    CORRECT = "correct"
+
+
 @dataclass
 class MemoryItem:
     memory_type: MemoryType
@@ -41,7 +49,7 @@ class MemoryItem:
         current = now or datetime.now(self.valid_from.tzinfo)
         if self.valid_to is None:
             return True
-        return self.valid_to >= current
+        return self.valid_to > current
 
     def same_identity(self, other: "MemoryItem") -> bool:
         return (
@@ -90,6 +98,69 @@ class MemoryItem:
                 if payload.get("last_updated")
                 else None
             ),
+        )
+
+
+@dataclass
+class WriteDecision:
+    memory: MemoryItem
+    should_write: bool
+    score: float
+    threshold: float
+    reason: str
+    factors: dict[str, float] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "memory": self.memory.to_dict(),
+            "should_write": self.should_write,
+            "score": round(self.score, 3),
+            "threshold": round(self.threshold, 3),
+            "reason": self.reason,
+            "factors": {key: round(value, 3) for key, value in self.factors.items()},
+        }
+
+
+@dataclass
+class MemoryAuditEvent:
+    action: AuditAction
+    timestamp: datetime
+    memory_type: MemoryType
+    key: str
+    value: Any
+    source: str
+    reason: str
+    confidence: float | None = None
+    before: dict[str, Any] | None = None
+    after: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "action": self.action.value,
+            "timestamp": self.timestamp.isoformat(),
+            "type": self.memory_type.value,
+            "key": self.key,
+            "value": self.value,
+            "source": self.source,
+            "reason": self.reason,
+            "confidence": round(self.confidence, 3) if self.confidence is not None else None,
+            "before": self.before,
+            "after": self.after,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "MemoryAuditEvent":
+        return cls(
+            action=AuditAction(payload["action"]),
+            timestamp=datetime.fromisoformat(payload["timestamp"]),
+            memory_type=MemoryType(payload["type"]),
+            key=payload["key"],
+            value=payload["value"],
+            source=payload["source"],
+            reason=payload["reason"],
+            confidence=payload.get("confidence"),
+            before=payload.get("before"),
+            after=payload.get("after"),
         )
 
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .engine import MemoryStore
-from .schema import MemoryItem
+from .schema import MemoryAuditEvent, MemoryItem
 
 
 @dataclass
@@ -26,8 +26,11 @@ class DiskSessionRepository:
             return store
         payload = json.loads(path.read_text(encoding="utf-8"))
         memories = [MemoryItem.from_dict(item) for item in payload.get("memories", [])]
-        store.extend(memories)
-        return store
+        audit_events = [
+            MemoryAuditEvent.from_dict(item)
+            for item in payload.get("audit_events", [])
+        ]
+        return MemoryStore(memories=memories, audit_events=audit_events)
 
     def save_store(self, session_id: str, store: MemoryStore) -> None:
         path = self.session_path(session_id)
@@ -35,6 +38,7 @@ class DiskSessionRepository:
             "session_id": session_id,
             "memory_count": len(store.to_dict()),
             "memories": store.to_dict(),
+            "audit_events": store.audit_to_dict(),
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 

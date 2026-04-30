@@ -6,38 +6,117 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Iterable
 
-from .schema import MemoryItem, MemoryType, ResponsePolicy, StateDynamics
+from .schema import (
+    AuditAction,
+    MemoryAuditEvent,
+    MemoryItem,
+    MemoryType,
+    ResponsePolicy,
+    StateDynamics,
+    WriteDecision,
+)
 
 
 class MemoryStore:
-    def __init__(self) -> None:
-        self._memories: list[MemoryItem] = []
+    def __init__(
+        self,
+        memories: list[MemoryItem] | None = None,
+        audit_events: list[MemoryAuditEvent] | None = None,
+    ) -> None:
+        self._memories: list[MemoryItem] = memories or []
+        self._audit_events: list[MemoryAuditEvent] = audit_events or []
 
-    def add(self, memory: MemoryItem) -> None:
+    def add(self, memory: MemoryItem, reason: str = "memory accepted") -> None:
         memory.last_updated = memory.valid_from
         for existing in self._memories:
             if not existing.is_active(memory.valid_from):
                 continue
             if memory.same_identity(existing):
+                before = existing.to_dict()
                 existing.confidence = max(existing.confidence, memory.confidence)
                 existing.source = memory.source
                 existing.evidence = memory.evidence
                 existing.last_updated = memory.valid_from
                 if memory.valid_to is not None:
                     existing.valid_to = memory.valid_to
+                self._audit(
+                    AuditAction.MERGE,
+                    existing,
+                    reason=f"{reason}; merged with existing memory",
+                    before=before,
+                    after=existing.to_dict(),
+                )
                 return
             if (
                 memory.exclusive_group
                 and existing.exclusive_group == memory.exclusive_group
                 and existing.is_active(memory.valid_from)
             ):
+                before = existing.to_dict()
                 existing.valid_to = memory.valid_from
                 existing.last_updated = memory.valid_from
+                self._audit(
+                    AuditAction.RETIRE,
+                    existing,
+                    reason=f"replaced by exclusive memory {memory.key}={memory.value}",
+                    before=before,
+                    after=existing.to_dict(),
+                )
         self._memories.append(memory)
+        self._audit(AuditAction.WRITE, memory, reason=reason, after=memory.to_dict())
 
-    def extend(self, memories: Iterable[MemoryItem]) -> None:
+    def extend(self, memories: Iterable[MemoryItem], reason: str = "batch add") -> None:
         for memory in memories:
-            self.add(memory)
+            self.add(memory, reason=reason)
+
+    def reject(self, memory: MemoryItem, reason: str) -> None:
+        self._audit(AuditAction.REJECT, memory, reason=reason)
+
+    def retire(
+        self,
+        *,
+        key: str,
+        timestamp: datetime,
+        memory_type: MemoryType | None = None,
+        value: object | None = None,
+        reason: str = "manual retirement",
+    ) -> list[MemoryItem]:
+        retired: list[MemoryItem] = []
+        for existing in self._memories:
+            if existing.key != key:
+                continue
+            if memory_type is not None and existing.memory_type != memory_type:
+                continue
+            if value is not None and existing.value != value:
+                continue
+            if not existing.is_active(timestamp):
+                continue
+            before = existing.to_dict()
+            existing.valid_to = timestamp
+            existing.last_updated = timestamp
+            retired.append(existing)
+            self._audit(
+                AuditAction.RETIRE,
+                existing,
+                reason=reason,
+                before=before,
+                after=existing.to_dict(),
+            )
+        return retired
+
+    def correct(self, memory: MemoryItem, reason: str = "user correction") -> None:
+        if memory.exclusive_group:
+            self.retire(
+                key=memory.key,
+                timestamp=memory.valid_from,
+                memory_type=memory.memory_type,
+                reason=f"{reason}; replacing exclusive group {memory.exclusive_group}",
+            )
+        memory.confirmed_by_user = True
+        memory.source = memory.source or "user_correction"
+        memory.last_updated = memory.valid_from
+        self._memories.append(memory)
+        self._audit(AuditAction.CORRECT, memory, reason=reason, after=memory.to_dict())
 
     def active_memories(
         self,
@@ -58,8 +137,113 @@ class MemoryStore:
     def to_dict(self) -> list[dict]:
         return [memory.to_dict() for memory in self._memories]
 
+    def audit_log(self) -> list[MemoryAuditEvent]:
+        return list(self._audit_events)
+
+    def audit_to_dict(self) -> list[dict]:
+        return [event.to_dict() for event in self._audit_events]
+
     def dump_json(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+
+    def _audit(
+        self,
+        action: AuditAction,
+        memory: MemoryItem,
+        *,
+        reason: str,
+        before: dict | None = None,
+        after: dict | None = None,
+    ) -> None:
+        self._audit_events.append(
+            MemoryAuditEvent(
+                action=action,
+                timestamp=memory.last_updated or memory.valid_from,
+                memory_type=memory.memory_type,
+                key=memory.key,
+                value=memory.value,
+                source=memory.source,
+                reason=reason,
+                confidence=memory.confidence,
+                before=before,
+                after=after,
+            )
+        )
+
+
+class MemoryWriteEvaluator:
+    def __init__(self, threshold: float = 0.16) -> None:
+        self.threshold = threshold
+        self.reuse_by_key = {
+            "communication_style": 0.95,
+            "detail_preference": 0.95,
+            "response_opening": 0.92,
+            "explanation_structure": 0.9,
+            "decision_preference": 0.9,
+            "relationship_status": 0.7,
+            "work_status": 0.85,
+            "profession": 0.78,
+            "current_emotional_state": 0.9,
+            "current_bandwidth": 0.8,
+            "interest_long_term": 0.68,
+            "interest_short_term": 0.62,
+            "life_event": 0.74,
+        }
+
+    def evaluate(self, memory: MemoryItem) -> WriteDecision:
+        factors = {
+            "stability": self._stability(memory),
+            "reuse": self.reuse_by_key.get(memory.key, 0.6),
+            "personalization_gain": self._personalization_gain(memory),
+            "confidence": memory.confidence,
+        }
+        score = 1.0
+        for value in factors.values():
+            score *= value
+        should_write = score >= self.threshold or memory.source == "user_correction"
+        reason = (
+            "passes write policy"
+            if should_write
+            else "below write policy threshold"
+        )
+        return WriteDecision(
+            memory=memory,
+            should_write=should_write,
+            score=score,
+            threshold=self.threshold,
+            reason=reason,
+            factors=factors,
+        )
+
+    def filter(self, memories: Iterable[MemoryItem]) -> tuple[list[MemoryItem], list[WriteDecision]]:
+        decisions = [self.evaluate(memory) for memory in memories]
+        accepted = [decision.memory for decision in decisions if decision.should_write]
+        return accepted, decisions
+
+    def _stability(self, memory: MemoryItem) -> float:
+        if memory.memory_type == MemoryType.PREFERENCE:
+            return 0.92
+        if memory.memory_type == MemoryType.PROFILE:
+            return 0.64
+        if memory.memory_type == MemoryType.EVENT:
+            return 0.72
+        return {
+            StateDynamics.STATIC: 0.95,
+            StateDynamics.SEMI_STATIC: 0.82,
+            StateDynamics.FLUID: 0.58,
+            StateDynamics.NOT_APPLICABLE: 0.7,
+        }[memory.dynamics]
+
+    def _personalization_gain(self, memory: MemoryItem) -> float:
+        if memory.memory_type == MemoryType.PREFERENCE:
+            return 0.98
+        if memory.memory_type == MemoryType.PROFILE:
+            return 0.9
+        if memory.key in {"current_emotional_state", "current_bandwidth", "work_status"}:
+            return 0.88
+        if "interest" in memory.tags:
+            return 0.62
+        return 0.72
 
 
 class DialogueMemoryExtractor:
