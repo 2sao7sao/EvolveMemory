@@ -179,7 +179,8 @@ compatibility:
 - `ContextCompiler` separates direct facts, style policy, event follow-up cues,
   hidden constraints, and clarification prompts.
 - `NormalizedSQLiteMemoryRepository` adds the first normalized Phase 2
-  `memory_records` table, indexes, CRUD, tombstone delete, and legacy
+  `memory_records`, `memory_evidence`, and `memory_audit_events` tables,
+  indexes, CRUD, tombstone delete, operation application, and legacy
   `MemoryStore` migration path.
 - `WeightedMemoryWriteEvaluatorV2`, `ContradictionDetector`, and
   `MemoryOperationPlanner` add the first deterministic write-governance layer:
@@ -191,12 +192,18 @@ compatibility:
 - `CareerEventSkill` adds the first event-state skill for interview/job-search
   progress detection and follow-up eligibility.
 - `/v2/users/{user_id}/turns/ingest`, `/v2/users/{user_id}/memory/query`, and
-  `/v2/users/{user_id}/prompt-context` expose the Phase 2 API shape.
+  `/v2/users/{user_id}/prompt-context` expose the Phase 2 API shape. v2 ingest
+  now persists planned operations to normalized SQLite and v2 query prefers
+  normalized records when available.
+- `/v2/users/{user_id}/memory/audit` exposes normalized lifecycle audit events.
+- `/v2/users/{user_id}/memory/review-queue` and
+  `/v2/users/{user_id}/memory/review-queue/{review_id}/resolve` add the first
+  approve/reject flow for memories that require user confirmation.
 - `evals/runner.py` adds the first gate evaluation smoke suite.
 
 This is not the full Phase 2 scope yet. LLM extraction, normalized SQLite
-tables, hybrid retrieval, event skills, review APIs, and privacy governance are
-tracked as the next implementation milestones.
+event state persistence, hybrid retrieval, more event skills, review APIs, and
+privacy governance are tracked as the next implementation milestones.
 
 ---
 

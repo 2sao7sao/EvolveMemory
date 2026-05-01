@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
@@ -30,6 +31,7 @@ from memory_system import (
     QueryMemoryRetriever,
     ResponsePolicyEngine,
     RuleMemoryProposalExtractor,
+    Sensitivity,
     TurnPreprocessor,
     SessionMemoryRuntime,
     SQLiteSessionRepository,
@@ -425,6 +427,69 @@ class MemorySystemTest(unittest.TestCase):
             self.assertIn("life_event", keys)
             self.assertIn("communication_style", keys)
 
+    def test_normalized_sqlite_repository_applies_write_operations(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+            turn = TurnPreprocessor().preprocess(
+                text="记住，回答直接一点。",
+                timestamp=timestamp,
+                turn_id="turn_1",
+            )
+            records = RuleMemoryProposalExtractor().propose(
+                turn,
+                user_id="user-1",
+                session_id="session-1",
+            )
+            operations = MemoryOperationPlanner().plan(
+                records,
+                [],
+                WritePolicyContext(user_command="remember"),
+            )
+
+            persisted = repo.apply_operations(operations, created_at=timestamp)
+            active = repo.list_records(user_id="user-1", session_id="session-1")
+            audit = repo.list_audit_events(user_id="user-1")
+
+            self.assertTrue(persisted)
+            self.assertEqual(active[0].key, "communication_style")
+            self.assertEqual(audit[0]["action"], "create")
+
+    def test_normalized_sqlite_repository_review_queue_approval(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+            record = MemoryRecord(
+                user_id="user-1",
+                session_id="session-1",
+                layer=MemoryLayer.SEMANTIC_FACT,
+                key="relationship_status",
+                value="single",
+                normalized_value="single",
+                confidence=0.6,
+                sensitivity=Sensitivity.SENSITIVE,
+                valid_from=timestamp,
+                observed_at=timestamp,
+                exclusive_group="relationship_status",
+                coexistence_rule="mutually_exclusive",
+                metadata={"evidence": "我现在单身"},
+            )
+            operation = WeightedMemoryWriteEvaluatorV2().evaluate(record)
+
+            repo.apply_operations([operation], created_at=timestamp)
+            review_items = repo.list_review_items(user_id="user-1")
+            persisted = repo.resolve_review_item(
+                str(review_items[0]["id"]),
+                approve=True,
+                user_id="user-1",
+                resolved_at=timestamp,
+            )
+
+            self.assertEqual(operation.operation.value, "ask_user_confirmation")
+            self.assertEqual(len(review_items), 1)
+            self.assertTrue(persisted)
+            self.assertEqual(repo.list_records(user_id="user-1")[0].key, "relationship_status")
+
     def test_write_policy_rejects_low_value_memory(self) -> None:
         memory = MemoryItem(
             memory_type=MemoryType.STATE,
@@ -642,6 +707,7 @@ class MemoryApiTest(unittest.TestCase):
         self.assertTrue(ingest_payload["candidate_memories"])
         self.assertTrue(ingest_payload["operations"])
         self.assertTrue(ingest_payload["event_states"])
+        self.assertTrue(ingest_payload["persisted_records"])
 
         query = self.client.post(
             "/v2/users/test-user/memory/query",
@@ -655,8 +721,13 @@ class MemoryApiTest(unittest.TestCase):
         self.assertEqual(query.status_code, 200)
         payload = query.json()
         self.assertIn("compiled_context", payload)
+        self.assertIn("normalized_sqlite", payload["retrieval_plan"]["retrieval_modes"])
         self.assertTrue(payload["gate"]["selected"])
         self.assertTrue(payload["compiled_context"]["event_followups"])
+
+        audit = self.client.get("/v2/users/test-user/memory/audit")
+        self.assertEqual(audit.status_code, 200)
+        self.assertTrue(audit.json()["audit_events"])
 
     def test_v2_ingest_honors_do_not_remember_command(self) -> None:
         ingest = self.client.post(
@@ -687,6 +758,47 @@ class MemoryApiTest(unittest.TestCase):
 
         self.assertEqual(query.status_code, 200)
         self.assertEqual(query.json()["candidates"], [])
+
+    def test_v2_review_queue_approval_api(self) -> None:
+        session_id = f"phase2-review-{uuid4().hex}"
+        ingest = self.client.post(
+            "/v2/users/test-user/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "我现在单身。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(ingest.status_code, 200)
+        self.assertEqual(ingest.json()["operations"][0]["operation"], "ask_user_confirmation")
+
+        pending_query = self.client.post(
+            "/v2/users/test-user/memory/query",
+            json={
+                "session_id": session_id,
+                "query": "我的感情状态是什么？",
+            },
+        )
+        self.assertEqual(pending_query.status_code, 200)
+        self.assertEqual(pending_query.json()["candidates"], [])
+
+        queue = self.client.get("/v2/users/test-user/memory/review-queue")
+        self.assertEqual(queue.status_code, 200)
+        review_items = [
+            item
+            for item in queue.json()["review_items"]
+            if "relationship_status" in item["candidate_json"]
+        ]
+        self.assertTrue(review_items)
+
+        resolved = self.client.post(
+            f"/v2/users/test-user/memory/review-queue/{review_items[0]['id']}/resolve",
+            json={"approve": True},
+        )
+        self.assertEqual(resolved.status_code, 200)
+        self.assertEqual(resolved.json()["status"], "approved")
+        self.assertTrue(resolved.json()["persisted_records"])
 
 
 if __name__ == "__main__":

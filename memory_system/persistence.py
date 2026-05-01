@@ -4,11 +4,19 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 from .engine import MemoryStore
-from .models import MemoryRecord, MemoryStatus
+from .models import (
+    MemoryEvidence,
+    MemoryOperation,
+    MemoryOperationType,
+    MemoryRecord,
+    MemoryStatus,
+)
 from .schema import MemoryAuditEvent, MemoryItem
 
 
@@ -204,6 +212,7 @@ class NormalizedSQLiteMemoryRepository:
         *,
         user_id: str,
         status: MemoryStatus | None = MemoryStatus.ACTIVE,
+        session_id: str | None = None,
         key: str | None = None,
         limit: int = 100,
     ) -> list[MemoryRecord]:
@@ -212,6 +221,9 @@ class NormalizedSQLiteMemoryRepository:
         if status is not None:
             query += " AND status = ?"
             params.append(status.value)
+        if session_id is not None:
+            query += " AND session_id = ?"
+            params.append(session_id)
         if key is not None:
             query += " AND key = ?"
             params.append(key)
@@ -220,6 +232,280 @@ class NormalizedSQLiteMemoryRepository:
         with self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_record(row) for row in rows]
+
+    def apply_operation(
+        self,
+        operation: MemoryOperation,
+        *,
+        created_at: datetime | None = None,
+    ) -> list[MemoryRecord]:
+        timestamp = created_at or datetime.now(timezone.utc)
+        if operation.operation == MemoryOperationType.CREATE:
+            record = self.upsert_record(operation.candidate)
+            self.add_evidence_for_record(record, created_at=timestamp)
+            self.record_operation_audit(operation, memory_id=str(record.id), created_at=timestamp)
+            return [record]
+        if operation.operation == MemoryOperationType.SUPERSEDE and operation.target_memory_id:
+            existing = self.get_record(str(operation.target_memory_id))
+            candidate = operation.candidate.model_copy(deep=True)
+            if existing is None:
+                record = self.upsert_record(candidate)
+                self.add_evidence_for_record(record, created_at=timestamp)
+                self.record_operation_audit(operation, memory_id=str(record.id), created_at=timestamp)
+                return [record]
+            existing.superseded_by = candidate.id
+            existing.status = MemoryStatus.SUPERSEDED
+            candidate.supersedes = existing.id
+            candidate.version = existing.version + 1
+            self.upsert_record(existing)
+            record = self.upsert_record(candidate)
+            self.add_evidence_for_record(record, created_at=timestamp)
+            self.record_operation_audit(operation, memory_id=str(record.id), created_at=timestamp)
+            return [existing, record]
+        if operation.operation == MemoryOperationType.ADD_EVIDENCE_ONLY and operation.target_memory_id:
+            existing = self.get_record(str(operation.target_memory_id))
+            if existing is None:
+                self.record_operation_audit(operation, memory_id=None, created_at=timestamp)
+                return []
+            candidate = operation.candidate
+            existing.confidence = max(existing.confidence, candidate.confidence)
+            existing.source_turn_ids = sorted(
+                set(existing.source_turn_ids + candidate.source_turn_ids)
+            )
+            existing.tags = sorted(set(existing.tags + candidate.tags))
+            existing.metadata["evidence_count"] = int(existing.metadata.get("evidence_count", 1)) + 1
+            self.upsert_record(existing)
+            self.add_evidence_for_record(
+                candidate,
+                memory_id=str(existing.id),
+                created_at=timestamp,
+            )
+            self.record_operation_audit(operation, memory_id=str(existing.id), created_at=timestamp)
+            return [existing]
+        if operation.operation == MemoryOperationType.ASK_USER_CONFIRMATION:
+            self.enqueue_review(operation, created_at=timestamp)
+            self.record_operation_audit(operation, memory_id=None, created_at=timestamp)
+            return []
+        self.record_operation_audit(operation, memory_id=None, created_at=timestamp)
+        return []
+
+    def apply_operations(
+        self,
+        operations: list[MemoryOperation],
+        *,
+        created_at: datetime | None = None,
+    ) -> list[MemoryRecord]:
+        records: list[MemoryRecord] = []
+        for operation in operations:
+            records.extend(self.apply_operation(operation, created_at=created_at))
+        return records
+
+    def add_evidence_for_record(
+        self,
+        record: MemoryRecord,
+        *,
+        memory_id: str | None = None,
+        created_at: datetime | None = None,
+    ) -> MemoryEvidence:
+        evidence_text = str(record.metadata.get("evidence", ""))
+        quote_hash = record.source_text_hash or sha256(evidence_text.encode("utf-8")).hexdigest()
+        evidence = MemoryEvidence(
+            tenant_id=record.tenant_id,
+            user_id=record.user_id,
+            memory_id=memory_id or record.id,
+            turn_id=record.source_turn_ids[0] if record.source_turn_ids else "unknown",
+            role="user",
+            quote=evidence_text,
+            quote_hash=quote_hash,
+            extraction_rationale=record.metadata.get("extraction_rationale", ""),
+            extractor_version=record.metadata.get("extractor_version", "rule-v1"),
+            confidence=record.confidence,
+            created_at=created_at or datetime.now(timezone.utc),
+        )
+        payload = evidence.model_dump(mode="json")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO memory_evidence (
+                    id, tenant_id, user_id, memory_id, turn_id, role, quote,
+                    quote_hash, extraction_rationale, extractor_version,
+                    confidence, created_at
+                )
+                VALUES (
+                    :id, :tenant_id, :user_id, :memory_id, :turn_id, :role, :quote,
+                    :quote_hash, :extraction_rationale, :extractor_version,
+                    :confidence, :created_at
+                )
+                """,
+                payload,
+            )
+        return evidence
+
+    def record_operation_audit(
+        self,
+        operation: MemoryOperation,
+        *,
+        memory_id: str | None,
+        created_at: datetime | None = None,
+    ) -> dict[str, object]:
+        timestamp = created_at or datetime.now(timezone.utc)
+        payload: dict[str, object] = {
+            "id": str(uuid4()),
+            "tenant_id": operation.candidate.tenant_id,
+            "user_id": operation.candidate.user_id,
+            "actor": "system",
+            "action": operation.operation.value,
+            "memory_id": memory_id,
+            "before_json": None,
+            "after_json": json.dumps(operation.candidate.model_dump(mode="json"), ensure_ascii=False),
+            "reason": operation.reason,
+            "policy_version": operation.audit_metadata.get("policy_version", "write-v2.0"),
+            "created_at": timestamp.isoformat(),
+        }
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO memory_audit_events (
+                    id, tenant_id, user_id, actor, action, memory_id, before_json,
+                    after_json, reason, policy_version, created_at
+                )
+                VALUES (
+                    :id, :tenant_id, :user_id, :actor, :action, :memory_id, :before_json,
+                    :after_json, :reason, :policy_version, :created_at
+                )
+                """,
+                payload,
+            )
+        return payload
+
+    def list_audit_events(
+        self,
+        *,
+        user_id: str,
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM memory_audit_events
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def enqueue_review(
+        self,
+        operation: MemoryOperation,
+        *,
+        created_at: datetime | None = None,
+    ) -> dict[str, object]:
+        timestamp = created_at or datetime.now(timezone.utc)
+        payload: dict[str, object] = {
+            "id": str(uuid4()),
+            "tenant_id": operation.candidate.tenant_id,
+            "user_id": operation.candidate.user_id,
+            "operation": operation.operation.value,
+            "candidate_json": json.dumps(operation.candidate.model_dump(mode="json"), ensure_ascii=False),
+            "target_memory_id": str(operation.target_memory_id) if operation.target_memory_id else None,
+            "reason": operation.reason,
+            "score": operation.score,
+            "status": "pending",
+            "created_at": timestamp.isoformat(),
+            "resolved_at": None,
+        }
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO memory_review_queue (
+                    id, tenant_id, user_id, operation, candidate_json,
+                    target_memory_id, reason, score, status, created_at, resolved_at
+                )
+                VALUES (
+                    :id, :tenant_id, :user_id, :operation, :candidate_json,
+                    :target_memory_id, :reason, :score, :status, :created_at, :resolved_at
+                )
+                """,
+                payload,
+            )
+        return payload
+
+    def list_review_items(
+        self,
+        *,
+        user_id: str,
+        status: str = "pending",
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM memory_review_queue
+                WHERE user_id = ? AND status = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (user_id, status, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_review_item(
+        self,
+        review_id: str,
+        *,
+        user_id: str | None = None,
+    ) -> dict[str, object] | None:
+        query = "SELECT * FROM memory_review_queue WHERE id = ?"
+        params: list[object] = [review_id]
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        with self._connect() as conn:
+            row = conn.execute(query, params).fetchone()
+        return dict(row) if row else None
+
+    def resolve_review_item(
+        self,
+        review_id: str,
+        *,
+        approve: bool,
+        user_id: str | None = None,
+        resolved_at: datetime | None = None,
+    ) -> list[MemoryRecord]:
+        timestamp = resolved_at or datetime.now(timezone.utc)
+        row = self.get_review_item(review_id, user_id=user_id)
+        if row is None or row["status"] != "pending":
+            return []
+        status = "approved" if approve else "rejected"
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE memory_review_queue
+                SET status = ?, resolved_at = ?
+                WHERE id = ?
+                """,
+                (status, timestamp.isoformat(), review_id),
+            )
+        if not approve:
+            return []
+        candidate = MemoryRecord.model_validate(json.loads(str(row["candidate_json"])))
+        operation_type = (
+            MemoryOperationType.SUPERSEDE
+            if row["target_memory_id"]
+            else MemoryOperationType.CREATE
+        )
+        operation = MemoryOperation(
+            operation=operation_type,
+            candidate=candidate,
+            target_memory_id=row["target_memory_id"],
+            reason=f"user approved review item {review_id}",
+            score=float(row["score"]),
+            requires_user_review=False,
+            audit_metadata={"policy_version": "review-v2.0"},
+        )
+        return self.apply_operation(operation, created_at=timestamp)
 
     def mark_deleted(self, memory_id: str, *, updated_at: datetime | None = None) -> bool:
         timestamp = (updated_at or datetime.now(timezone.utc)).isoformat()
@@ -377,4 +663,68 @@ class NormalizedSQLiteMemoryRepository:
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_memory_validity ON memory_records(user_id, valid_from, valid_to)"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_evidence (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    memory_id TEXT,
+                    turn_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    quote TEXT NOT NULL,
+                    quote_hash TEXT NOT NULL,
+                    extraction_rationale TEXT NOT NULL,
+                    extractor_version TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_evidence_memory ON memory_evidence(memory_id)"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_audit_events (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    memory_id TEXT,
+                    before_json TEXT,
+                    after_json TEXT,
+                    reason TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_audit_user ON memory_audit_events(user_id, created_at)"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_review_queue (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    candidate_json TEXT NOT NULL,
+                    target_memory_id TEXT,
+                    reason TEXT NOT NULL,
+                    score REAL NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    resolved_at TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_review_user_status
+                ON memory_review_queue(user_id, status, created_at)
+                """
             )

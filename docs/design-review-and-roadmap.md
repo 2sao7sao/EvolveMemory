@@ -51,15 +51,17 @@ Current implementation:
 - Correction and retirement APIs exist.
 - `MemoryStore` uses active-time windows instead of deleting history.
 - Phase 2 `MemoryRecord` adds status, version, supersession, authority, sensitivity, and allowed use.
-- `NormalizedSQLiteMemoryRepository` adds the first normalized storage path.
+- `NormalizedSQLiteMemoryRepository` adds normalized records, evidence, audit tables, and operation application.
 - `WeightedMemoryWriteEvaluatorV2` and `MemoryOperationPlanner` add deterministic write-governance planning.
+- v2 ingest now connects preprocessing, proposal extraction, write planning, normalized persistence, and career event detection.
+- v2 query now prefers normalized records when available.
 
 Gap:
 
-- Supersession is planned but not yet fully applied as a normalized storage mutation.
-- Normalized storage exists but the main runtime still uses legacy session payload persistence.
+- Supersession is now applied in normalized storage, but review responses do not yet expose rich before/after diffs.
+- Legacy session payload persistence is still maintained for Phase 1 compatibility.
 - There is no migration CLI yet.
-- There is no review queue table or API yet.
+- Review queue table and approve/reject API exist, but there is no settings UI or batch review workflow yet.
 - Sensitive field encryption and retention policy are not implemented.
 
 ### 1.3 How To Use Memory
@@ -88,11 +90,9 @@ Gap:
 
 ## 2. Current Code Review Findings
 
-### P1: Phase 2 Runtime Is Split Between Legacy And New Paths
+### P1: Phase 2 Runtime Still Needs Review Governance
 
-The project now has strong Phase 2 models and planning logic, but `SessionMemoryRuntime`
-still writes through `MemoryItem` and legacy session repositories. This is intentional
-for compatibility, but the next major integration step is to connect v2 ingest to:
+The v2 ingest path now connects:
 
 ```text
 TurnPreprocessor
@@ -102,15 +102,17 @@ TurnPreprocessor
 -> NormalizedSQLiteMemoryRepository
 ```
 
-Until that happens, v2 models and normalized storage are available but not the primary runtime path.
+Operations that require confirmation are now stored in a review queue and can
+be approved or rejected through API. The remaining P1 gap is governance policy:
+memory settings, batch review, explanations, and normalized correction / delete
+flows need to be exposed together.
 
 ### P1: User Governance Is Still Incomplete
 
 The system has correction, retirement, settings models, sensitivity, and tombstone delete,
 but does not yet expose full user governance:
 
-- review suggestions
-- approve / reject memory
+- review suggestions with explanations
 - memory settings API
 - forget-all endpoint over normalized records
 - audit export
@@ -154,15 +156,15 @@ should cover:
 
 ## 3. Recommended Next Iteration Order
 
-1. Connect v2 ingest to normalized storage and operation planning.
-2. Add normalized audit events and evidence tables.
-3. Add memory review queue and memory settings APIs.
-4. Add `forget-all` and normalized delete semantics.
-5. Add event state persistence and `CareerEventSkill` integration.
-6. Add query intent classifier and retrieval planner.
-7. Add embedding provider interface and hybrid retrieval.
-8. Add LLM proposal extractor interface with JSON validation and repair.
-9. Add more event skills.
+1. Add memory settings APIs.
+2. Add `forget-all` and normalized delete semantics.
+3. Add event state persistence and `CareerEventSkill` integration.
+4. Add query intent classifier and retrieval planner.
+5. Add embedding provider interface and hybrid retrieval.
+6. Add LLM proposal extractor interface with JSON validation and repair.
+7. Add more event skills.
+8. Add migration CLI from legacy session payloads to normalized records.
+9. Add sensitive field encryption and retention enforcement.
 10. Expand eval harness from smoke tests to quality metrics.
 
 ## 4. Summary
