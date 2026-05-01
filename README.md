@@ -33,6 +33,7 @@ or converted into response behavior right now?
 - [Why](#why)
 - [What It Builds](#what-it-builds)
 - [Current Architecture](#current-architecture)
+- [Phase 2 Foundation](#phase-2-foundation)
 - [Memory Use Gate](#memory-use-gate)
 - [Memory Layers](#memory-layers)
 - [Event Progress Skills](#event-progress-skills)
@@ -158,6 +159,32 @@ query
   -> build response policy
   -> optionally assemble prompt context
 ```
+
+---
+
+## Phase 2 Foundation
+
+The Phase 2 optimization spec is now tracked in
+[docs/phase2-optimization-spec.md](docs/phase2-optimization-spec.md). The first
+implementation slice focuses on foundation work that preserves Phase 1
+compatibility:
+
+- `memory_system/models.py` adds Phase 2 models such as `MemoryRecord`,
+  `MemoryEvidence`, `MemoryOperation`, `EventMemoryState`, and graph edges.
+- `MemoryItem -> MemoryRecord` adapters keep the current runtime compatible
+  while preparing normalized storage.
+- `MemoryUseGate` now supports the Phase 2 action set:
+  `use_directly`, `style_only`, `follow_up`, `clarify`, `hidden_constraint`,
+  `summarize_only`, and `suppress`.
+- `ContextCompiler` separates direct facts, style policy, event follow-up cues,
+  hidden constraints, and clarification prompts.
+- `/v2/users/{user_id}/turns/ingest`, `/v2/users/{user_id}/memory/query`, and
+  `/v2/users/{user_id}/prompt-context` expose the Phase 2 API shape.
+- `evals/runner.py` adds the first gate evaluation smoke suite.
+
+This is not the full Phase 2 scope yet. LLM extraction, normalized SQLite
+tables, hybrid retrieval, event skills, review APIs, and privacy governance are
+tracked as the next implementation milestones.
 
 ---
 
@@ -668,6 +695,22 @@ Inspect supported memory slots:
 
 ```bash
 curl http://127.0.0.1:8000/memory-slots
+```
+
+Phase 2 ingest endpoint:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v2/users/demo/turns/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"demo","role":"user","text":"我最近准备面试，有点焦虑。回答直接一点，先给结论。"}'
+```
+
+Phase 2 query endpoint:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v2/users/demo/memory/query \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"demo","query":"面试怎么准备？","options":{"max_prompt_memories":8,"include_debug":true}}'
 ```
 
 Ingest a raw dialogue turn:

@@ -2,17 +2,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .context import ContextCompiler
 from .schema import MemoryItem, ResponsePolicy
 
 
 @dataclass
 class PromptContextBuilder:
+    context_compiler: ContextCompiler | None = None
+
+    def __post_init__(self) -> None:
+        if self.context_compiler is None:
+            self.context_compiler = ContextCompiler()
+
     def build(
         self,
         query: str,
         relevant_memories: list[MemoryItem],
         policy: ResponsePolicy,
         memory_gate: dict[str, object] | None = None,
+        compiled_context: dict[str, object] | None = None,
     ) -> dict[str, object]:
         memory_lines = [
             f"- {item.key}: {item.value} (confidence={item.confidence:.2f}, evidence={item.evidence})"
@@ -48,12 +56,13 @@ class PromptContextBuilder:
                 ]
             )
         gate_lines = self._gate_lines(memory_gate)
+        memory_context = self._compiled_sections(query, compiled_context)
         assembled_prompt = "\n\n".join(
             [
                 "[System Guidance]",
                 system_prompt,
-                "[Memory Use Gate]",
-                gate_lines,
+                "[Memory Use Gate]\n" + gate_lines,
+                memory_context,
                 "[Relevant User Memory]",
                 user_context,
                 "[Response Policy]",
@@ -67,6 +76,15 @@ class PromptContextBuilder:
             "system_prompt": system_prompt,
             "relevant_memory_lines": memory_lines,
             "memory_gate": memory_gate or {"selected": [], "suppressed": []},
+            "compiled_context": compiled_context
+            or {
+                "direct_facts": [],
+                "style_policy": [],
+                "event_followups": [],
+                "hidden_constraints": [],
+                "clarification_prompts": [],
+                "suppressed_count": 0,
+            },
             "response_policy": policy.to_dict(),
             "assembled_prompt": assembled_prompt,
         }
@@ -88,3 +106,32 @@ class PromptContextBuilder:
                 f"- {memory.get('key')}: action={item.get('action')}, layer={item.get('layer')}"
             )
         return "\n".join(lines) if lines else "- no gate decisions"
+
+    def _compiled_sections(
+        self,
+        query: str,
+        compiled_context: dict[str, object] | None,
+    ) -> str:
+        if not compiled_context or self.context_compiler is None:
+            return "\n\n".join(
+                [
+                    "[Direct User Facts]\n- none",
+                    "[Style Preferences]\n- none",
+                    "[Event Follow-up Cues]\n- none",
+                    "[Hidden Constraints]\n- none",
+                    "[Clarification Prompts]\n- none",
+                ]
+            )
+        from .context import CompiledMemoryContext
+
+        context = CompiledMemoryContext(
+            direct_facts=list(compiled_context.get("direct_facts", [])),
+            style_policy=list(compiled_context.get("style_policy", [])),
+            event_followups=list(compiled_context.get("event_followups", [])),
+            hidden_constraints=list(compiled_context.get("hidden_constraints", [])),
+            clarification_prompts=list(compiled_context.get("clarification_prompts", [])),
+            suppressed_count=int(compiled_context.get("suppressed_count", 0)),
+            response_policy=dict(compiled_context.get("response_policy", {})),
+            audit_debug=dict(compiled_context.get("audit_debug", {})),
+        )
+        return self.context_compiler.render_prompt_sections(context, query)

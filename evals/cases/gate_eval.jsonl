@@ -1,0 +1,2 @@
+{"id":"career_interview_gate_001","turns":["我最近准备面试，有点焦虑。","回答直接一点，先给结论。"],"query":"面试怎么准备？","expected_gate":{"life_event":"follow_up","current_emotional_state":"summarize_only","communication_style":"style_only","response_opening":"style_only"}}
+{"id":"privacy_irrelevant_gate_001","turns":["我29岁，硕士毕业，现在单身。"],"query":"帮我写一个 Python 函数。","expected_gate":{"age":"suppress","relationship_status":"suppress"}}

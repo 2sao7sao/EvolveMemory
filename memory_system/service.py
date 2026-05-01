@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
+from .context import ContextCompiler
 from .engine import (
     DialogueMemoryExtractor,
     MemoryStore,
@@ -31,6 +32,7 @@ class SessionMemoryRuntime:
     inferencer: ProfileInferencer = field(default_factory=ProfileInferencer)
     retriever: QueryMemoryRetriever = field(default_factory=QueryMemoryRetriever)
     use_gate: MemoryUseGate = field(default_factory=MemoryUseGate)
+    context_compiler: ContextCompiler = field(default_factory=ContextCompiler)
     policy_engine: ResponsePolicyEngine = field(default_factory=ResponsePolicyEngine)
     prompt_builder: PromptContextBuilder = field(default_factory=PromptContextBuilder)
     structured_parser: StructuredMemoryParser | None = None
@@ -88,10 +90,16 @@ class SessionMemoryRuntime:
         gate_result = self.use_gate.select(query_text, candidates, now=timestamp, limit=limit)
         relevant = gate_result.selected
         policy = self.policy_engine.build_from_memories(relevant)
+        compiled_context = self.context_compiler.compile(
+            query=query_text,
+            gate_result=gate_result,
+            response_policy=policy,
+        )
         return {
             "query": query_text,
             "relevant_memories": [item.to_dict() for item in relevant],
             "memory_gate": gate_result.to_dict(),
+            "compiled_context": compiled_context.to_dict(),
             "response_policy": policy.to_dict(),
         }
 
@@ -101,11 +109,17 @@ class SessionMemoryRuntime:
         gate_result = self.use_gate.select(query_text, candidates, now=timestamp, limit=limit)
         relevant = gate_result.selected
         policy = self.policy_engine.build_from_memories(relevant)
+        compiled_context = self.context_compiler.compile(
+            query=query_text,
+            gate_result=gate_result,
+            response_policy=policy,
+        )
         return self.prompt_builder.build(
             query_text,
             relevant,
             policy,
             memory_gate=gate_result.to_dict(),
+            compiled_context=compiled_context.to_dict(),
         )
 
     def correct_memory(

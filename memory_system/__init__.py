@@ -8,12 +8,27 @@ from .engine import (
     QueryMemoryRetriever,
     ResponsePolicyEngine,
 )
+from .context import CompiledMemoryContext, ContextCompiler
 from .gating import (
     MemoryGateDecision,
     MemoryGateResult,
-    MemoryLayer,
     MemoryUseAction,
     MemoryUseGate,
+)
+from .models import (
+    AllowedUse,
+    Authority,
+    EventMemoryState,
+    FollowupPolicy,
+    MemoryEvidence,
+    MemoryGraphEdge,
+    MemoryLayer,
+    MemoryOperation,
+    MemoryOperationType,
+    MemoryRecord,
+    MemoryStatus,
+    PromptVisibility,
+    Sensitivity,
 )
 from .persistence import DiskSessionRepository, SQLiteSessionRepository, SessionRepository
 from .prompting import PromptContextBuilder
@@ -32,13 +47,25 @@ from .structured import StructuredMemoryParser, memory_extraction_schema
 
 __all__ = [
     "AuditAction",
+    "AllowedUse",
+    "Authority",
+    "CompiledMemoryContext",
+    "ContextCompiler",
     "DialogueMemoryExtractor",
     "DiskSessionRepository",
+    "EventMemoryState",
+    "FollowupPolicy",
     "MemoryAuditEvent",
+    "MemoryEvidence",
     "MemoryGateDecision",
     "MemoryGateResult",
+    "MemoryGraphEdge",
     "MemoryItem",
     "MemoryLayer",
+    "MemoryOperation",
+    "MemoryOperationType",
+    "MemoryRecord",
+    "MemoryStatus",
     "MemoryStore",
     "MemoryType",
     "MemoryUseAction",
@@ -46,6 +73,7 @@ __all__ = [
     "MemoryWriteEvaluator",
     "ProfileInferencer",
     "PromptContextBuilder",
+    "PromptVisibility",
     "QueryMemoryRetriever",
     "ResponsePolicy",
     "ResponsePolicyEngine",
@@ -54,6 +82,7 @@ __all__ = [
     "SQLiteSessionRepository",
     "SlotDefinition",
     "StateDynamics",
+    "Sensitivity",
     "StructuredMemoryParser",
     "WriteDecision",
     "memory_extraction_schema",

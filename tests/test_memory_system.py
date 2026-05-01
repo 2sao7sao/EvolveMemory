@@ -12,6 +12,8 @@ from memory_system import (
     DialogueMemoryExtractor,
     DiskSessionRepository,
     MemoryItem,
+    MemoryLayer,
+    MemoryRecord,
     MemoryUseAction,
     MemoryUseGate,
     MemorySlotRegistry,
@@ -164,7 +166,20 @@ class MemorySystemTest(unittest.TestCase):
         )
 
         self.assertEqual(result.decisions[0].action, MemoryUseAction.FOLLOW_UP)
-        self.assertEqual(result.decisions[0].layer.value, "event_memory")
+        self.assertEqual(result.decisions[0].layer, MemoryLayer.EPISODIC_EVENT)
+
+    def test_memory_record_adapter_maps_legacy_item_to_phase2_layer(self) -> None:
+        item = self.extractor.extract(
+            "回答直接一点。",
+            source="turn_1",
+            timestamp=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+        )[0]
+
+        record = MemoryRecord.from_memory_item(item, user_id="user-1", session_id="session-1")
+
+        self.assertEqual(record.layer, MemoryLayer.PREFERENCE)
+        self.assertEqual(record.allowed_use[0].value, "style")
+        self.assertEqual(record.metadata["legacy_type"], "preference")
 
     def test_prompt_builder_outputs_assembled_prompt(self) -> None:
         turns = [
@@ -332,6 +347,7 @@ class MemoryApiTest(unittest.TestCase):
 
         self.assertTrue(query_payload["relevant_memories"])
         self.assertTrue(query_payload["memory_gate"]["selected"])
+        self.assertTrue(query_payload["compiled_context"]["style_policy"])
         self.assertEqual(
             query_payload["response_policy"]["decision_mode"],
             "give_recommendation",
@@ -357,6 +373,7 @@ class MemoryApiTest(unittest.TestCase):
         payload = response.json()
         self.assertIn("assembled_prompt", payload)
         self.assertIn("[Memory Use Gate]", payload["assembled_prompt"])
+        self.assertIn("[Direct User Facts]", payload["assembled_prompt"])
         self.assertIn("[Current User Query]", payload["assembled_prompt"])
 
     def test_structured_ingest_and_audit_api(self) -> None:
@@ -415,6 +432,34 @@ class MemoryApiTest(unittest.TestCase):
         keys = [slot["key"] for slot in response.json()["slots"]]
         self.assertIn("relationship_status", keys)
         self.assertIn("response_opening", keys)
+
+    def test_v2_ingest_and_memory_query_api(self) -> None:
+        ingest = self.client.post(
+            "/v2/users/test-user/turns/ingest",
+            json={
+                "session_id": "phase2",
+                "role": "user",
+                "text": "我最近准备面试，有点焦虑。回答直接一点，先给结论。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(ingest.status_code, 200)
+        self.assertTrue(ingest.json()["candidate_memories"])
+
+        query = self.client.post(
+            "/v2/users/test-user/memory/query",
+            json={
+                "session_id": "phase2",
+                "query": "面试怎么准备？",
+                "options": {"max_prompt_memories": 8, "include_debug": True},
+            },
+        )
+
+        self.assertEqual(query.status_code, 200)
+        payload = query.json()
+        self.assertIn("compiled_context", payload)
+        self.assertTrue(payload["gate"]["selected"])
+        self.assertTrue(payload["compiled_context"]["event_followups"])
 
 
 if __name__ == "__main__":

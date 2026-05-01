@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException
@@ -21,7 +22,7 @@ DATA_DIR = Path(os.getenv("AME_DATA_DIR", str(DEFAULT_DATA_DIR)))
 JSON_SESSION_DIR = Path(os.getenv("AME_JSON_SESSION_DIR", str(DATA_DIR / "sessions")))
 SQLITE_DB_PATH = Path(os.getenv("AME_SQLITE_DB_PATH", str(DATA_DIR / "adaptive_memory.sqlite3")))
 STORAGE_BACKEND = os.getenv("AME_STORAGE_BACKEND", "json").strip().lower()
-app = FastAPI(title="EvolveMemory", version="0.4.0")
+app = FastAPI(title="EvolveMemory", version="0.5.0")
 
 
 class IngestRequest(BaseModel):
@@ -40,6 +41,32 @@ class QueryRequest(BaseModel):
     query: str = Field(..., description="The current user query.")
     timestamp: datetime | None = Field(None, description="Optional query time.")
     limit: int = Field(12, ge=1, le=50, description="Maximum relevant memories to return.")
+
+
+class V2IngestOptions(BaseModel):
+    extract_memory: bool = True
+    auto_write: bool = True
+    return_candidates: bool = True
+
+
+class V2IngestTurnRequest(BaseModel):
+    session_id: str | None = None
+    role: str = "user"
+    text: str
+    timestamp: datetime | None = None
+    options: V2IngestOptions = Field(default_factory=V2IngestOptions)
+
+
+class V2QueryOptions(BaseModel):
+    max_prompt_memories: int = Field(8, ge=1, le=50)
+    include_debug: bool = False
+
+
+class V2MemoryQueryRequest(BaseModel):
+    session_id: str | None = None
+    query: str
+    timestamp: datetime | None = None
+    options: V2QueryOptions = Field(default_factory=V2QueryOptions)
 
 
 class CorrectMemoryRequest(BaseModel):
@@ -91,6 +118,10 @@ class SessionManager:
 manager = SessionManager()
 
 
+def v2_session_key(user_id: str, session_id: str | None) -> str:
+    return f"{user_id}:{session_id}" if session_id else user_id
+
+
 def build_repository() -> "SessionRepository":
     from memory_system.persistence import (
         DiskSessionRepository,
@@ -124,6 +155,80 @@ def health() -> dict[str, str]:
 @app.get("/memory-slots")
 def memory_slots() -> dict[str, Any]:
     return {"slots": MemorySlotRegistry.default().to_dict()}
+
+
+@app.post("/v2/users/{user_id}/turns/ingest")
+def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]:
+    timestamp = normalize_timestamp(request.timestamp)
+    turn_id = f"turn_{uuid4().hex[:12]}"
+    runtime = manager.get(v2_session_key(user_id, request.session_id))
+    if request.role != "user" or not request.options.extract_memory:
+        return {
+            "turn_id": turn_id,
+            "candidate_memories": [],
+            "write_decisions": [],
+            "operations": [],
+            "active_memory_delta": {
+                "created": 0,
+                "updated": 0,
+                "rejected": 0,
+                "review_required": 0,
+            },
+        }
+    result = runtime.ingest_turn(request.text, source=turn_id, timestamp=timestamp)
+    return {
+        "turn_id": turn_id,
+        "candidate_memories": result["candidates"] if request.options.return_candidates else [],
+        "write_decisions": result["write_decisions"],
+        "operations": [],
+        "active_memory_delta": {
+            "created": len(result["accepted_memories"]) + len(result["accepted_inferred_memories"]),
+            "updated": 0,
+            "rejected": len(
+                [decision for decision in result["write_decisions"] if not decision["should_write"]]
+            ),
+            "review_required": 0,
+        },
+    }
+
+
+@app.post("/v2/users/{user_id}/memory/query")
+def v2_memory_query(user_id: str, request: V2MemoryQueryRequest) -> dict[str, Any]:
+    runtime = manager.get(v2_session_key(user_id, request.session_id))
+    timestamp = normalize_timestamp(request.timestamp)
+    result = runtime.query(
+        request.query,
+        timestamp=timestamp,
+        limit=request.options.max_prompt_memories,
+    )
+    return {
+        "retrieval_plan": {
+            "retrieval_modes": ["keyword", "temporal", "recent"],
+            "max_prompt_memories": request.options.max_prompt_memories,
+            "include_debug": request.options.include_debug,
+        },
+        "candidates": result["relevant_memories"],
+        "gate": result["memory_gate"],
+        "compiled_context": result["compiled_context"],
+        "response_policy": result["response_policy"],
+    }
+
+
+@app.post("/v2/users/{user_id}/prompt-context")
+def v2_prompt_context(user_id: str, request: V2MemoryQueryRequest) -> dict[str, Any]:
+    runtime = manager.get(v2_session_key(user_id, request.session_id))
+    timestamp = normalize_timestamp(request.timestamp)
+    result = runtime.prompt_context(
+        request.query,
+        timestamp=timestamp,
+        limit=request.options.max_prompt_memories,
+    )
+    return {
+        "system_guidance": result["system_prompt"],
+        "memory_context": result["compiled_context"],
+        "response_policy": result["response_policy"],
+        "assembled_prompt": result["assembled_prompt"],
+    }
 
 
 @app.post("/sessions/{session_id}/ingest")

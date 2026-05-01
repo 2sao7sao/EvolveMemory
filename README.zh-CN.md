@@ -31,6 +31,7 @@ EvolveMemory 是一个面向对话式 AI 的用户中心记忆系统原型。它
 - [为什么需要这个项目](#为什么需要这个项目)
 - [当前能力](#当前能力)
 - [系统架构](#系统架构)
+- [Phase 2 Foundation](#phase-2-foundation)
 - [记忆使用门控](#记忆使用门控)
 - [记忆分层](#记忆分层)
 - [事件进展 Skills](#事件进展-skills)
@@ -150,6 +151,23 @@ query
   -> 构建 response policy
   -> 生成 prompt context
 ```
+
+---
+
+## Phase 2 Foundation
+
+Phase 2 优化规格已纳入仓库：
+[docs/phase2-optimization-spec.md](docs/phase2-optimization-spec.md)。
+当前先落地第一批 foundation 能力，并保持 Phase 1 兼容：
+
+- `memory_system/models.py` 增加 `MemoryRecord`、`MemoryEvidence`、`MemoryOperation`、`EventMemoryState`、graph edge 等 Phase 2 模型。
+- 增加 `MemoryItem -> MemoryRecord` adapter，为后续 normalized storage 做准备。
+- `MemoryUseGate` 扩展到 Phase 2 的 7 个 action：`use_directly`、`style_only`、`follow_up`、`clarify`、`hidden_constraint`、`summarize_only`、`suppress`。
+- `ContextCompiler` 将上下文拆成 direct facts、style policy、event follow-up cues、hidden constraints、clarification prompts。
+- 新增 `/v2/users/{user_id}/turns/ingest`、`/v2/users/{user_id}/memory/query`、`/v2/users/{user_id}/prompt-context`，提供 Phase 2 API 形态。
+- `evals/runner.py` 增加第一版 gate eval smoke suite。
+
+这还不是完整 Phase 2。LLM extraction、normalized SQLite tables、hybrid retrieval、event skills、review APIs 和 privacy governance 会作为后续里程碑继续实现。
 
 ---
 
@@ -377,6 +395,22 @@ curl http://127.0.0.1:8000/health
 
 ```bash
 curl http://127.0.0.1:8000/memory-slots
+```
+
+Phase 2 写入接口：
+
+```bash
+curl -X POST http://127.0.0.1:8000/v2/users/demo/turns/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"demo","role":"user","text":"我最近准备面试，有点焦虑。回答直接一点，先给结论。"}'
+```
+
+Phase 2 查询接口：
+
+```bash
+curl -X POST http://127.0.0.1:8000/v2/users/demo/memory/query \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"demo","query":"面试怎么准备？","options":{"max_prompt_memories":8,"include_debug":true}}'
 ```
 
 写入一轮对话：
