@@ -49,6 +49,13 @@ from .schema import (
 )
 from .service import SessionMemoryRuntime
 from .structured import StructuredMemoryParser, memory_extraction_schema
+from .writing import (
+    Contradiction,
+    ContradictionDetector,
+    MemoryOperationPlanner,
+    WeightedMemoryWriteEvaluatorV2,
+    WritePolicyContext,
+)
 
 __all__ = [
     "AuditAction",
@@ -56,6 +63,8 @@ __all__ = [
     "Authority",
     "CompiledMemoryContext",
     "ContextCompiler",
+    "Contradiction",
+    "ContradictionDetector",
     "DialogueMemoryExtractor",
     "DiskSessionRepository",
     "EventMemoryState",
@@ -69,6 +78,7 @@ __all__ = [
     "MemoryLayer",
     "MemoryOperation",
     "MemoryOperationType",
+    "MemoryOperationPlanner",
     "MemoryRecord",
     "MemoryStatus",
     "MemoryStore",
@@ -90,7 +100,9 @@ __all__ = [
     "StateDynamics",
     "Sensitivity",
     "StructuredMemoryParser",
+    "WeightedMemoryWriteEvaluatorV2",
     "WriteDecision",
+    "WritePolicyContext",
     "memory_extraction_schema",
     "MemorySlotRegistry",
 ]

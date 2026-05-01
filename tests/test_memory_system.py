@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from memory_system import (
     DialogueMemoryExtractor,
     DiskSessionRepository,
+    MemoryOperationPlanner,
     MemoryItem,
     MemoryLayer,
     MemoryRecord,
@@ -29,6 +30,8 @@ from memory_system import (
     SQLiteSessionRepository,
     StateDynamics,
     StructuredMemoryParser,
+    WeightedMemoryWriteEvaluatorV2,
+    WritePolicyContext,
 )
 from app import app
 
@@ -181,6 +184,76 @@ class MemorySystemTest(unittest.TestCase):
         self.assertEqual(record.layer, MemoryLayer.PREFERENCE)
         self.assertEqual(record.allowed_use[0].value, "style")
         self.assertEqual(record.metadata["legacy_type"], "preference")
+
+    def test_write_evaluator_v2_rejects_do_not_remember_command(self) -> None:
+        item = self.extractor.extract(
+            "回答直接一点。",
+            source="turn_1",
+            timestamp=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+        )[0]
+        record = MemoryRecord.from_memory_item(item, user_id="user-1")
+
+        operation = WeightedMemoryWriteEvaluatorV2().evaluate(
+            record,
+            context=WritePolicyContext(user_command="do_not_remember"),
+        )
+
+        self.assertEqual(operation.operation.value, "reject")
+        self.assertEqual(operation.score, 0.0)
+
+    def test_write_evaluator_v2_supersedes_exclusive_conflict(self) -> None:
+        old_item = self.extractor.extract(
+            "我现在单身。",
+            source="turn_1",
+            timestamp=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+        )[0]
+        new_item = self.extractor.extract(
+            "我已经恋爱了。",
+            source="turn_2",
+            timestamp=datetime(2026, 4, 16, 10, 0, tzinfo=self.tz),
+        )[0]
+        old_record = MemoryRecord.from_memory_item(old_item, user_id="user-1")
+        new_record = MemoryRecord.from_memory_item(new_item, user_id="user-1")
+
+        operation = WeightedMemoryWriteEvaluatorV2().evaluate(new_record, [old_record])
+
+        self.assertEqual(operation.operation.value, "supersede")
+        self.assertEqual(operation.target_memory_id, old_record.id)
+
+    def test_write_evaluator_v2_routes_low_confidence_sensitive_memory_to_review(self) -> None:
+        item = MemoryItem(
+            memory_type=MemoryType.STATE,
+            key="current_emotional_state",
+            value="anxious",
+            confidence=0.6,
+            source="turn_1",
+            evidence="可能有点焦虑",
+            valid_from=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+            confirmed_by_user=True,
+            dynamics=StateDynamics.FLUID,
+            tags=["sensitive"],
+        )
+        record = MemoryRecord.from_memory_item(item, user_id="user-1")
+
+        operation = WeightedMemoryWriteEvaluatorV2().evaluate(record)
+
+        self.assertEqual(operation.operation.value, "ask_user_confirmation")
+        self.assertTrue(operation.requires_user_review)
+
+    def test_operation_planner_simulates_prior_candidates_for_duplicates(self) -> None:
+        item = self.extractor.extract(
+            "回答直接一点。",
+            source="turn_1",
+            timestamp=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+        )[0]
+        first = MemoryRecord.from_memory_item(item, user_id="user-1")
+        second = MemoryRecord.from_memory_item(item, user_id="user-1")
+
+        operations = MemoryOperationPlanner().plan([first, second], [])
+
+        self.assertEqual(operations[0].operation.value, "create")
+        self.assertEqual(operations[1].operation.value, "add_evidence_only")
+        self.assertEqual(operations[1].target_memory_id, first.id)
 
     def test_prompt_builder_outputs_assembled_prompt(self) -> None:
         turns = [
