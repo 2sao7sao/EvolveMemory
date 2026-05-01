@@ -45,7 +45,7 @@ Given what we know about this user, how should the model respond right now?
 - Candidate memories are scored before writing through a configurable write policy.
 - State memory supports mutual exclusion, coexistence, validity windows, correction, and audit.
 - Query-time retrieval produces a response policy instead of dumping all memory into a prompt.
-- The current implementation is a working FastAPI prototype with local JSON persistence.
+- The current implementation is a working FastAPI prototype with local JSON or SQLite persistence.
 
 ---
 
@@ -100,7 +100,7 @@ The current prototype includes:
 - response policy generation
 - model-ready prompt context
 - FastAPI service endpoints
-- local JSON persistence
+- local JSON or SQLite persistence
 - demo and unit tests
 
 ---
@@ -123,6 +123,7 @@ flowchart TD
     H --> I["PromptContextBuilder"]
     I --> J["Model-ready prompt context"]
     D --> K["DiskSessionRepository"]
+    D --> N["SQLiteSessionRepository"]
     D --> L["Correction / retirement API"]
     L --> D
     L --> M["Audit: correct / retire"]
@@ -230,7 +231,9 @@ Current dimensions:
 | `ResponsePolicyEngine` | `memory_system/engine.py` | Converts memory signals into response policy. |
 | `StructuredMemoryParser` | `memory_system/structured.py` | Parses LLM-produced JSON extraction payloads into `MemoryItem` objects. |
 | `PromptContextBuilder` | `memory_system/prompting.py` | Builds model-ready prompt context from relevant memory and policy. |
+| `SessionRepository` | `memory_system/persistence.py` | Storage interface shared by JSON and SQLite repositories. |
 | `DiskSessionRepository` | `memory_system/persistence.py` | Persists session memory and audit events to local JSON files. |
+| `SQLiteSessionRepository` | `memory_system/persistence.py` | Persists session memory and audit events to a local SQLite database. |
 | `SessionMemoryRuntime` | `memory_system/service.py` | Orchestrates extraction, scoring, storage, inference, retrieval, and prompt context. |
 | FastAPI app | `app.py` | Provides HTTP endpoints for integration. |
 | Demo CLI | `demo.py` | Runs the memory loop locally with sample turns. |
@@ -440,7 +443,7 @@ has important gaps.
 | Retrieval | Keyword/rule retrieval exists. | Need semantic retrieval, query intent classification, and policy-aware ranking. |
 | Correction | Explicit correction and retirement exist. | Need UX for reviewing memory and accepting/rejecting suggestions. |
 | Audit | Memory lifecycle audit exists. | Need diff UI, export, and privacy review. |
-| Persistence | Local JSON session files exist. | Need database repository, migrations, encryption, and multi-user auth. |
+| Persistence | Local JSON and SQLite session repositories exist. | Need migrations, encryption, backups, and multi-user auth. |
 
 ---
 
@@ -450,6 +453,21 @@ Start the service:
 
 ```bash
 uvicorn app:app --reload
+```
+
+Storage backend defaults to local JSON files. Use SQLite when you want a single
+local database file:
+
+```bash
+AME_STORAGE_BACKEND=sqlite uvicorn app:app --reload
+```
+
+Optional storage path overrides:
+
+```bash
+AME_DATA_DIR=/var/lib/adaptive-memory
+AME_JSON_SESSION_DIR=/var/lib/adaptive-memory/sessions
+AME_SQLITE_DB_PATH=/var/lib/adaptive-memory/adaptive_memory.sqlite3
 ```
 
 Health check:
@@ -566,7 +584,13 @@ Session files are stored under:
 data/sessions/<session_id>.json
 ```
 
-Runtime session JSON is ignored by git.
+SQLite mode stores data under:
+
+```bash
+data/adaptive_memory.sqlite3
+```
+
+Runtime session JSON and SQLite files are ignored by git.
 
 ---
 
@@ -604,7 +628,7 @@ Use the response policy as the main control layer.
 
 - The built-in raw dialogue extractor is rule-based and Chinese-first.
 - Retrieval is keyword and rule weighted, not embedding based.
-- Persistence is local JSON, not a database.
+- Persistence is local JSON or SQLite; production migrations, encryption, backups, and auth are still missing.
 - Profile inference is deterministic and narrow.
 - There is no production LLM call in this repository yet.
 - There is no authentication layer around the FastAPI service.
@@ -624,7 +648,7 @@ be upgraded independently.
 4. Add configurable decay policies by memory type and dynamics.
 5. Add contradiction detection beyond exclusive groups.
 6. Add a memory review UI for accepting, correcting, and retiring memories.
-7. Add database-backed repositories.
+7. Add production-grade migrations and encrypted persistence.
 8. Add policy-conditioned answer generation over `assembled_prompt`.
 9. Add privacy controls for sensitive memory categories.
 10. Add offline evaluation for personalization quality.

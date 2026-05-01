@@ -8,7 +8,7 @@ from .engine import (
     QueryMemoryRetriever,
     ResponsePolicyEngine,
 )
-from .persistence import DiskSessionRepository
+from .persistence import DiskSessionRepository, SQLiteSessionRepository, SessionRepository
 from .prompting import PromptContextBuilder
 from .registry import MemorySlotRegistry, SlotDefinition
 from .schema import (
@@ -38,6 +38,8 @@ __all__ = [
     "ResponsePolicy",
     "ResponsePolicyEngine",
     "SessionMemoryRuntime",
+    "SessionRepository",
+    "SQLiteSessionRepository",
     "SlotDefinition",
     "StateDynamics",
     "StructuredMemoryParser",

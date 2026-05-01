@@ -21,6 +21,7 @@ from memory_system import (
     QueryMemoryRetriever,
     ResponsePolicyEngine,
     SessionMemoryRuntime,
+    SQLiteSessionRepository,
     StateDynamics,
     StructuredMemoryParser,
 )
@@ -160,6 +161,20 @@ class MemorySystemTest(unittest.TestCase):
             self.assertIn("work_status", keys)
             self.assertIn("communication_style", keys)
 
+    def test_sqlite_repository_persists_memories(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = SQLiteSessionRepository(Path(temp_dir) / "memory.sqlite3")
+            runtime = SessionMemoryRuntime(session_id="sqlite-user", repository=repo)
+            timestamp = datetime(2026, 4, 16, 9, 0, tzinfo=self.tz)
+            runtime.ingest_turn("我最近在找工作，回答直接一点。", "turn_1", timestamp)
+
+            reloaded = SessionMemoryRuntime(session_id="sqlite-user", repository=repo)
+            active = reloaded.active_memories(timestamp)
+            keys = [item["key"] for item in active]
+
+            self.assertIn("work_status", keys)
+            self.assertIn("communication_style", keys)
+
     def test_write_policy_rejects_low_value_memory(self) -> None:
         memory = MemoryItem(
             memory_type=MemoryType.STATE,
@@ -278,6 +293,13 @@ class MemoryApiTest(unittest.TestCase):
             query_payload["response_policy"]["decision_mode"],
             "give_recommendation",
         )
+
+    def test_health_reports_storage_backend(self) -> None:
+        response = self.client.get("/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+        self.assertIn("storage_backend", response.json())
 
     def test_prompt_context_api(self) -> None:
         self.client.post(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
@@ -15,7 +16,11 @@ from memory_system.schema import MemoryType, StateDynamics
 
 
 APP_TIMEZONE = ZoneInfo("Asia/Shanghai")
-DATA_DIR = Path(__file__).resolve().parent / "data" / "sessions"
+DEFAULT_DATA_DIR = Path(__file__).resolve().parent / "data"
+DATA_DIR = Path(os.getenv("AME_DATA_DIR", str(DEFAULT_DATA_DIR)))
+JSON_SESSION_DIR = Path(os.getenv("AME_JSON_SESSION_DIR", str(DATA_DIR / "sessions")))
+SQLITE_DB_PATH = Path(os.getenv("AME_SQLITE_DB_PATH", str(DATA_DIR / "adaptive_memory.sqlite3")))
+STORAGE_BACKEND = os.getenv("AME_STORAGE_BACKEND", "json").strip().lower()
 app = FastAPI(title="Adaptive Memory Engine", version="0.3.0")
 
 
@@ -67,19 +72,15 @@ class SessionManager:
     def get(self, session_id: str) -> SessionMemoryRuntime:
         with self._lock:
             if session_id not in self._sessions:
-                from memory_system.persistence import DiskSessionRepository
-
                 self._sessions[session_id] = SessionMemoryRuntime(
                     session_id=session_id,
-                    repository=DiskSessionRepository(DATA_DIR),
+                    repository=build_repository(),
                 )
             return self._sessions[session_id]
 
     def reset(self, session_id: str) -> None:
         with self._lock:
-            from memory_system.persistence import DiskSessionRepository
-
-            repository = DiskSessionRepository(DATA_DIR)
+            repository = build_repository()
             repository.reset(session_id)
             self._sessions[session_id] = SessionMemoryRuntime(
                 session_id=session_id,
@@ -88,6 +89,20 @@ class SessionManager:
 
 
 manager = SessionManager()
+
+
+def build_repository() -> "SessionRepository":
+    from memory_system.persistence import (
+        DiskSessionRepository,
+        SQLiteSessionRepository,
+        SessionRepository,
+    )
+
+    if STORAGE_BACKEND == "sqlite":
+        return SQLiteSessionRepository(SQLITE_DB_PATH)
+    if STORAGE_BACKEND == "json":
+        return DiskSessionRepository(JSON_SESSION_DIR)
+    raise ValueError(f"Unsupported AME_STORAGE_BACKEND={STORAGE_BACKEND!r}")
 
 
 def normalize_timestamp(value: datetime | None) -> datetime:
@@ -100,7 +115,10 @@ def normalize_timestamp(value: datetime | None) -> datetime:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "storage_backend": STORAGE_BACKEND,
+    }
 
 
 @app.get("/memory-slots")

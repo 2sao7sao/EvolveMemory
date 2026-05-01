@@ -12,7 +12,7 @@ from .engine import (
     QueryMemoryRetriever,
     ResponsePolicyEngine,
 )
-from .persistence import DiskSessionRepository
+from .persistence import SessionRepository
 from .prompting import PromptContextBuilder
 from .registry import MemorySlotRegistry
 from .schema import MemoryItem, MemoryType, StateDynamics
@@ -22,7 +22,7 @@ from .structured import StructuredMemoryParser
 @dataclass
 class SessionMemoryRuntime:
     session_id: str | None = None
-    repository: DiskSessionRepository | None = None
+    repository: SessionRepository | None = None
     registry: MemorySlotRegistry = field(default_factory=MemorySlotRegistry.default)
     store: MemoryStore = field(default_factory=MemoryStore)
     extractor: DialogueMemoryExtractor | None = None
