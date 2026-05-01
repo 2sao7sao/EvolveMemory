@@ -12,6 +12,7 @@ from .engine import (
     QueryMemoryRetriever,
     ResponsePolicyEngine,
 )
+from .gating import MemoryUseGate
 from .persistence import SessionRepository
 from .prompting import PromptContextBuilder
 from .registry import MemorySlotRegistry
@@ -29,6 +30,7 @@ class SessionMemoryRuntime:
     write_evaluator: MemoryWriteEvaluator | None = None
     inferencer: ProfileInferencer = field(default_factory=ProfileInferencer)
     retriever: QueryMemoryRetriever = field(default_factory=QueryMemoryRetriever)
+    use_gate: MemoryUseGate = field(default_factory=MemoryUseGate)
     policy_engine: ResponsePolicyEngine = field(default_factory=ResponsePolicyEngine)
     prompt_builder: PromptContextBuilder = field(default_factory=PromptContextBuilder)
     structured_parser: StructuredMemoryParser | None = None
@@ -82,19 +84,29 @@ class SessionMemoryRuntime:
 
     def query(self, query_text: str, timestamp: datetime, limit: int = 12) -> dict:
         active = self.store.active_memories(now=timestamp)
-        relevant = self.retriever.retrieve(query_text, active, limit=limit)
+        candidates = self.retriever.retrieve(query_text, active, limit=max(limit * 2, 12))
+        gate_result = self.use_gate.select(query_text, candidates, now=timestamp, limit=limit)
+        relevant = gate_result.selected
         policy = self.policy_engine.build_from_memories(relevant)
         return {
             "query": query_text,
             "relevant_memories": [item.to_dict() for item in relevant],
+            "memory_gate": gate_result.to_dict(),
             "response_policy": policy.to_dict(),
         }
 
     def prompt_context(self, query_text: str, timestamp: datetime, limit: int = 12) -> dict:
         active = self.store.active_memories(now=timestamp)
-        relevant = self.retriever.retrieve(query_text, active, limit=limit)
+        candidates = self.retriever.retrieve(query_text, active, limit=max(limit * 2, 12))
+        gate_result = self.use_gate.select(query_text, candidates, now=timestamp, limit=limit)
+        relevant = gate_result.selected
         policy = self.policy_engine.build_from_memories(relevant)
-        return self.prompt_builder.build(query_text, relevant, policy)
+        return self.prompt_builder.build(
+            query_text,
+            relevant,
+            policy,
+            memory_gate=gate_result.to_dict(),
+        )
 
     def correct_memory(
         self,

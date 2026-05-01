@@ -1,22 +1,22 @@
-<img src="assets/adaptive-memory-engine-hero.png" alt="Adaptive Memory Engine banner" width="100%" />
+<img src="assets/adaptive-memory-engine-hero.png" alt="EvolveMemory banner" width="100%" />
 
-# Adaptive Memory Engine
+# EvolveMemory
 
 [![Status](https://img.shields.io/badge/status-Prototype%20%2F%20WIP-yellow)](./README.md)
-[![Stars](https://img.shields.io/github/stars/2sao7sao/adaptive-memory-engine?style=flat)](https://github.com/2sao7sao/adaptive-memory-engine)
-[![Commit Activity](https://img.shields.io/github/commit-activity/m/2sao7sao/adaptive-memory-engine)](https://github.com/2sao7sao/adaptive-memory-engine/commits/main)
+[![Stars](https://img.shields.io/github/stars/2sao7sao/EvolveMemory?style=flat)](https://github.com/2sao7sao/EvolveMemory)
+[![Commit Activity](https://img.shields.io/github/commit-activity/m/2sao7sao/EvolveMemory)](https://github.com/2sao7sao/EvolveMemory/commits/main)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-brightgreen)](./requirements.txt)
 
-Adaptive Memory Engine is a user-centric memory system prototype for
-conversational AI. It turns dialogue into structured memory, decides what is
-worth keeping, and converts active memory into response guidance that helps a
-model answer in a way that fits the user.
+EvolveMemory is a user-centric memory system prototype for conversational AI.
+It turns dialogue into structured memory, decides what is worth keeping, and
+uses a memory gate to decide how each active memory may shape the next answer.
 
 The core question:
 
 ```text
-Given what we know about this user, how should the model respond right now?
+Given what we know about this user, which memories should be used, suppressed,
+or converted into response behavior right now?
 ```
 
 ---
@@ -28,7 +28,10 @@ Given what we know about this user, how should the model respond right now?
 - [Why](#why)
 - [What It Builds](#what-it-builds)
 - [Current Architecture](#current-architecture)
+- [Memory Use Gate](#memory-use-gate)
 - [Memory Layers](#memory-layers)
+- [Event Progress Skills](#event-progress-skills)
+- [Neuroscience Design Notes](#neuroscience-design-notes)
 - [Component Catalog](#component-catalog)
 - [Mode Presets](#mode-presets)
 - [Spec Gap](#spec-gap)
@@ -41,10 +44,11 @@ Given what we know about this user, how should the model respond right now?
 ## TL;DR
 
 - A memory engine for conversational AI, not a generic transcript database.
-- Four memory layers: `event`, `state`, `preference`, and `profile`.
+- Three responsibility layers: fact memory, inferred profile, and event memory.
 - Candidate memories are scored before writing through a configurable write policy.
 - State memory supports mutual exclusion, coexistence, validity windows, correction, and audit.
-- Query-time retrieval produces a response policy instead of dumping all memory into a prompt.
+- Query-time retrieval is followed by a memory use gate, so memory can be used directly, used only for style, used to trigger follow-up, or suppressed.
+- The response policy is generated after gating instead of dumping all memory into a prompt.
 - The current implementation is a working FastAPI prototype with local JSON or SQLite persistence.
 
 ---
@@ -58,8 +62,8 @@ The project is designed around one product belief:
 Memory is useful only when it changes behavior. A good system should know
 whether the user wants direct recommendations, calm explanation, dense detail,
 minimal follow-up, or a slower step-by-step discussion. Those response choices
-should be grounded in remembered events, current states, preferences, and
-revisable profile signals.
+should be grounded in remembered facts, evolving events, and revisable profile
+signals.
 
 Current status: **Prototype / WIP**.
 
@@ -75,10 +79,10 @@ Most memory systems stop at storage and retrieval:
 - They have weak correction paths when the system remembers something wrong.
 - They rarely explain why a memory was written, rejected, retired, or merged.
 
-Adaptive Memory Engine treats memory as an operational loop:
+EvolveMemory treats memory as an operational loop:
 
 ```text
-remember -> validate -> retrieve -> adapt response -> accept correction -> audit
+remember -> validate -> retrieve -> gate -> adapt response -> follow up -> audit
 ```
 
 ---
@@ -97,6 +101,7 @@ The current prototype includes:
 - audit events for memory lifecycle changes
 - profile inference from preferences and states
 - query-aware retrieval
+- memory use gating for direct use, style-only use, event follow-up, and suppression
 - response policy generation
 - model-ready prompt context
 - FastAPI service endpoints
@@ -107,7 +112,7 @@ The current prototype includes:
 
 ## Current Architecture
 
-<img src="assets/architecture.svg" alt="Adaptive Memory Engine architecture" width="100%" />
+<img src="assets/architecture.svg" alt="EvolveMemory architecture" width="100%" />
 
 ```mermaid
 flowchart TD
@@ -119,7 +124,8 @@ flowchart TD
     D --> F["ProfileInferencer"]
     F --> D
     D --> G["QueryMemoryRetriever"]
-    G --> H["ResponsePolicyEngine"]
+    G --> U["MemoryUseGate"]
+    U --> H["ResponsePolicyEngine"]
     H --> I["PromptContextBuilder"]
     I --> J["Model-ready prompt context"]
     D --> K["DiskSessionRepository"]
@@ -143,15 +149,88 @@ ingest
 query
   -> load active memories
   -> retrieve query-relevant memory
+  -> gate memory by relevance, freshness, authority, utility, and privacy
   -> build response policy
   -> optionally assemble prompt context
 ```
 
 ---
 
+## Memory Use Gate
+
+The core design principle is that retrieval is not the same as usage. A memory
+can be true and still be irrelevant, too sensitive, too stale, or only useful as
+communication guidance.
+
+`MemoryUseGate` evaluates candidate memories after retrieval and assigns one
+of four actions:
+
+| Action | Meaning | Example |
+| --- | --- | --- |
+| `use_directly` | The answer may use the memory as content. | Use current `work_status=job_seeking` when the query asks for career advice. |
+| `style_only` | The answer may adapt tone, structure, pace, or detail, but should not mention the memory. | Use `communication_style=direct` to answer more directly. |
+| `follow_up` | The memory is an evolving event and should trigger one lightweight progress check or next-step suggestion. | "你之前在准备面试，如果还在推进，我建议先更新岗位和时间线。" |
+| `suppress` | The memory should not influence this answer. | Do not use age, gender, relationship, or emotional state when unrelated. |
+
+Gate factors:
+
+- `relevance`: whether the memory matches the current query intent.
+- `freshness`: whether the memory is still within a useful time window.
+- `authority`: whether the memory was user-confirmed or only inferred.
+- `utility`: whether using it improves helpfulness or answer quality.
+- `privacy`: whether sensitive memory needs stronger relevance before use.
+
+This gives the system a practical answer to the most important product
+question: not just "what do we know?", but "what is allowed and useful to use
+right now?"
+
+---
+
 ## Memory Layers
 
-### Events
+EvolveMemory separates memory by responsibility rather than only by storage
+type.
+
+### Fact Memory
+
+Fact memory stores user-provided or directly observed facts. It includes stable
+facts, semi-static states, fluid states, and explicit preferences.
+
+Examples:
+
+- age, education, relationship status, work status
+- long-term and short-term interests
+- current emotional state or cognitive bandwidth
+- direct preferences such as "先给结论" or "别太啰嗦"
+
+Responsibilities:
+
+- maintain exclusivity rules for state slots
+- preserve validity windows for fluid states
+- expose facts only when the gate allows direct use
+- let explicit correction override inferred or stale memory
+
+### Inferred Profile
+
+Inferred profile memory is the system's hypothesis about the user, not a hard
+fact. It should mainly control answer behavior and should be easy to revise.
+
+Current dimensions:
+
+- `structure_preference_level`
+- `directness_preference_level`
+- `detail_tolerance`
+- `emotional_support_need`
+- `pace_preference`
+
+Responsibilities:
+
+- aggregate repeated facts and preferences into communication policy
+- avoid over-personalizing from one weak signal
+- remain lower authority than explicit user facts
+- normally pass the gate as `style_only`, not `use_directly`
+
+### Event Memory
 
 Events describe things that happened and may shape future context.
 
@@ -165,6 +244,105 @@ Examples:
 
 Events are time-sensitive. They often create or update states, and they are
 useful for follow-up support.
+
+Responsibilities:
+
+- segment experience into meaningful event records
+- track whether an event is open, progressing, blocked, resolved, or stale
+- generate event-based follow-up cues when useful
+- update related facts and states when new evidence arrives
+
+### Legacy Type Mapping
+
+Internally, the prototype still uses four schema types:
+
+- `event`: event memory
+- `state`: fact memory
+- `preference`: fact memory used heavily for response adaptation
+- `profile`: inferred profile memory
+
+The responsibility split is the product-level model. The schema types are the
+current implementation detail.
+
+---
+
+## Event Progress Skills
+
+Events are not static facts. An event is closer to a changing state machine:
+it has a beginning, observable progress, possible blockers, and resolution.
+EvolveMemory models this through event-progress skills.
+
+Recommended event skill shape:
+
+```json
+{
+  "skill": "career_event_tracker",
+  "event_key": "prepare_interview",
+  "status": "open",
+  "stage": "preparing",
+  "evidence": "我最近准备面试",
+  "expected_next_signal": "面试时间、岗位、结果、卡点",
+  "followup_policy": {
+    "cue": "career or interview query",
+    "action": "ask one progress-aware question or give next step",
+    "cooldown_days": 7
+  }
+}
+```
+
+Event state examples:
+
+| Status | Meaning | Gate behavior |
+| --- | --- | --- |
+| `open` | Event is active but incomplete. | Can trigger `follow_up` when query is related. |
+| `progressing` | New evidence shows movement. | Merge progress and update next expected signal. |
+| `blocked` | User reports obstacle or uncertainty. | Increase priority for support or planning. |
+| `resolved` | Event has ended. | Convert useful residue into facts, then retire active event. |
+| `stale` | No update after TTL or repeated non-use. | Suppress unless query explicitly revives it. |
+
+This is where a skills-based design fits well: each domain can own its event
+ontology, progress states, follow-up policy, and conversion rules. For example,
+a career skill tracks interviews and offers, a learning skill tracks exams and
+projects, and a relationship skill tracks sensitive life events with stricter
+privacy gates.
+
+---
+
+## Neuroscience Design Notes
+
+The event mechanism is inspired by several memory principles from cognitive
+neuroscience. These are design analogies, not claims that the software is a
+brain model.
+
+- Event segmentation: humans do not store experience as one continuous log.
+  Event Segmentation Theory argues that people maintain event models and update
+  them when prediction quality degrades or boundaries appear. This supports
+  using event boundaries instead of raw transcript chunks.
+- Prediction error: context mismatch and prediction error are associated with
+  updating episodic memory. For EvolveMemory, a strong mismatch should create a
+  new event version or update event status instead of blindly merging facts.
+- Reconsolidation/update: retrieved long-term memory can become modifiable when
+  relevant new information appears. For EvolveMemory, recalling an event during
+  a related query should open a controlled update window.
+- Prospective memory: future intentions can be time-based or event-based; event
+  cues can trigger retrieval, while reminders reduce cognitive load. For
+  EvolveMemory, event follow-up should be cue-triggered and sparse, not constant
+  nagging.
+- Cognitive control: profile memory should act like top-down control over
+  response style, while fact and event memory should require stronger relevance
+  to affect content.
+
+Design references:
+
+- [Segmentation in the perception and memory of events](https://pmc.ncbi.nlm.nih.gov/articles/PMC2263140/)
+- [Prediction Error Associated With The Perceptual Segmentation of Naturalistic Events](https://pmc.ncbi.nlm.nih.gov/articles/PMC8653780)
+- [Context Prediction Analysis and Episodic Memory](https://www.frontiersin.org/journals/behavioral-neuroscience/articles/10.3389/fnbeh.2013.00132/full)
+- [Memory Reconsolidation or Updating Consolidation?](https://www.ncbi.nlm.nih.gov/books/NBK3905/)
+- [Strategic reminder setting for time-based intentions](https://link.springer.com/article/10.3758/s13421-025-01708-x)
+
+---
+
+## State Details
 
 ### States
 
@@ -228,6 +406,7 @@ Current dimensions:
 | `MemoryStore` | `memory_system/engine.py` | Applies active-memory, merge, retirement, correction, and audit rules. |
 | `ProfileInferencer` | `memory_system/engine.py` | Infers user profile dimensions from active states and preferences. |
 | `QueryMemoryRetriever` | `memory_system/engine.py` | Retrieves memories relevant to the current user query. |
+| `MemoryUseGate` | `memory_system/gating.py` | Decides whether retrieved memory is used directly, style-only, follow-up, or suppressed. |
 | `ResponsePolicyEngine` | `memory_system/engine.py` | Converts memory signals into response policy. |
 | `StructuredMemoryParser` | `memory_system/structured.py` | Parses LLM-produced JSON extraction payloads into `MemoryItem` objects. |
 | `PromptContextBuilder` | `memory_system/prompting.py` | Builds model-ready prompt context from relevant memory and policy. |
@@ -349,7 +528,7 @@ or later than the current timestamp.
 
 ## Mode Presets
 
-<img src="assets/mode_matrix.svg" alt="Adaptive Memory Engine mode matrix" width="100%" />
+<img src="assets/mode_matrix.svg" alt="EvolveMemory mode matrix" width="100%" />
 
 The prototype can be reasoned about through operational modes:
 
@@ -357,6 +536,7 @@ The prototype can be reasoned about through operational modes:
 observe  -> extract candidates without assuming all are worth keeping
 write    -> score, accept, reject, merge, or retire memories
 retrieve -> select only query-relevant memories
+gate     -> decide direct use, style-only use, event follow-up, or suppression
 adapt    -> convert relevant memory into response policy
 correct  -> let users override or retire memory
 audit    -> inspect why memory changed
@@ -369,6 +549,7 @@ Mode comparison:
 | Observe | Extract candidate memory from dialogue or structured payloads. | Candidate `MemoryItem` list |
 | Write | Decide whether memory should persist. | `WriteDecision` and audit events |
 | Retrieve | Select memory for the current query. | Relevant active memory subset |
+| Gate | Decide how selected memory may influence the answer. | `MemoryGateResult` |
 | Adapt | Convert memory signals into answer behavior. | `ResponsePolicy` |
 | Correct | Apply explicit user correction or retirement. | Updated active memory and audit events |
 | Audit | Explain lifecycle changes. | Write, merge, reject, retire, and correct logs |
@@ -420,7 +601,8 @@ Expected shape:
 ```
 
 `StructuredMemoryParser` converts this payload into `MemoryItem` objects. The
-same write policy, audit, persistence, and retrieval layers then apply.
+same write policy, audit, persistence, retrieval, and use-gating layers then
+apply.
 
 ---
 
@@ -433,14 +615,15 @@ has important gaps.
 
 | Spec area | Current state | Gap to close |
 | --- | --- | --- |
-| Events | Basic event memory exists. | Need richer event ontology, causal links, follow-up tasks, and event-to-state transitions. |
+| Events | Basic event memory and gate-triggered follow-up exist. | Need richer event skills, causal links, cooldowns, and event-to-state transitions. |
 | Static / dynamic states | `static`, `semi_static`, `fluid`, and registry defaults exist. | Need richer TTL policies, transition rules, and state history summarization. |
 | Mutual exclusion | Implemented through `exclusive_group` and `MemorySlotRegistry`. | Need configurable project/user-level registry loading instead of only built-in defaults. |
 | Interests | Long-term and short-term interest slots exist. | Need recency scoring, frequency tracking, and interest decay. |
 | Profile | Basic inferred profile dimensions exist. | Need psychology-backed trait model, confidence aggregation, evidence accumulation, and user-visible explanations. |
-| Response adaptation | `ResponsePolicy` controls tone, detail, structure, decision mode, pace, empathy, and follow-up. | Need policy-to-answer generation, evaluation, and per-domain policy tuning. |
+| Memory usage | `MemoryUseGate` decides direct use, style-only use, follow-up, or suppression. | Need learned thresholds, per-user privacy settings, and offline evaluation. |
+| Response adaptation | `ResponsePolicy` controls tone, detail, structure, decision mode, pace, empathy, and follow-up after gating. | Need policy-to-answer generation, evaluation, and per-domain policy tuning. |
 | LLM extraction | Structured parser exists. | Need live LLM extractor, JSON schema validation, retries, and contradiction checks. |
-| Retrieval | Keyword/rule retrieval exists. | Need semantic retrieval, query intent classification, and policy-aware ranking. |
+| Retrieval | Keyword/rule retrieval plus use gating exists. | Need semantic retrieval, query intent classification, and policy-aware ranking before gating. |
 | Correction | Explicit correction and retirement exist. | Need UX for reviewing memory and accepting/rejecting suggestions. |
 | Audit | Memory lifecycle audit exists. | Need diff UI, export, and privacy review. |
 | Persistence | Local JSON and SQLite session repositories exist. | Need migrations, encryption, backups, and multi-user auth. |
@@ -599,6 +782,7 @@ Runtime session JSON and SQLite files are ignored by git.
 `/prompt-context` returns a model-facing object with:
 
 - `system_prompt`
+- `memory_gate`
 - `relevant_memory_lines`
 - `response_policy`
 - `assembled_prompt`
@@ -607,7 +791,11 @@ The assembled prompt is intentionally explicit:
 
 ```text
 [System Guidance]
-Use the response policy as the main control layer.
+Use the memory gate as the first control layer.
+
+[Memory Use Gate]
+- work_status: action=use_directly, layer=fact_memory
+- response_opening: action=style_only, layer=fact_memory
 
 [Relevant User Memory]
 - work_status: job_seeking
@@ -630,6 +818,7 @@ Use the response policy as the main control layer.
 - Retrieval is keyword and rule weighted, not embedding based.
 - Persistence is local JSON or SQLite; production migrations, encryption, backups, and auth are still missing.
 - Profile inference is deterministic and narrow.
+- Event progress skills are documented, but only the first gate-triggered follow-up behavior is implemented.
 - There is no production LLM call in this repository yet.
 - There is no authentication layer around the FastAPI service.
 - There is no UI for memory review, correction, or audit inspection.
@@ -642,28 +831,28 @@ be upgraded independently.
 
 ## Roadmap
 
-1. Add a declarative memory slot registry and state-machine configuration.
-2. Connect `StructuredMemoryParser` to a production LLM extraction call.
-3. Add semantic retrieval with embeddings.
-4. Add configurable decay policies by memory type and dynamics.
-5. Add contradiction detection beyond exclusive groups.
-6. Add a memory review UI for accepting, correcting, and retiring memories.
-7. Add production-grade migrations and encrypted persistence.
-8. Add policy-conditioned answer generation over `assembled_prompt`.
-9. Add privacy controls for sensitive memory categories.
-10. Add offline evaluation for personalization quality.
+1. Add domain event skills for career, learning, relationship, and project progress.
+2. Add cooldown-aware event follow-up and event-to-state conversion rules.
+3. Connect `StructuredMemoryParser` to a production LLM extraction call.
+4. Add semantic retrieval with embeddings before `MemoryUseGate`.
+5. Add configurable decay policies by memory type and dynamics.
+6. Add learned gate thresholds and offline personalization evaluation.
+7. Add contradiction detection beyond exclusive groups.
+8. Add a memory review UI for accepting, correcting, and retiring memories.
+9. Add production-grade migrations, encrypted persistence, and privacy controls.
+10. Add policy-conditioned answer generation over `assembled_prompt`.
 
 ---
 
 ## Star History
 
-![Star History](https://api.star-history.com/svg?repos=2sao7sao/adaptive-memory-engine&type=Date)
+![Star History](https://api.star-history.com/svg?repos=2sao7sao/EvolveMemory&type=Date)
 
 ---
 
 ## Commit Activity
 
-![Commit Activity Graph](https://github-readme-activity-graph.vercel.app/graph?username=2sao7sao&repo=adaptive-memory-engine&theme=github-compact)
+![Commit Activity Graph](https://github-readme-activity-graph.vercel.app/graph?username=2sao7sao&repo=EvolveMemory&theme=github-compact)
 
 ---
 

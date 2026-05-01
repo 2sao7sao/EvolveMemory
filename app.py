@@ -21,7 +21,7 @@ DATA_DIR = Path(os.getenv("AME_DATA_DIR", str(DEFAULT_DATA_DIR)))
 JSON_SESSION_DIR = Path(os.getenv("AME_JSON_SESSION_DIR", str(DATA_DIR / "sessions")))
 SQLITE_DB_PATH = Path(os.getenv("AME_SQLITE_DB_PATH", str(DATA_DIR / "adaptive_memory.sqlite3")))
 STORAGE_BACKEND = os.getenv("AME_STORAGE_BACKEND", "json").strip().lower()
-app = FastAPI(title="Adaptive Memory Engine", version="0.3.0")
+app = FastAPI(title="EvolveMemory", version="0.4.0")
 
 
 class IngestRequest(BaseModel):

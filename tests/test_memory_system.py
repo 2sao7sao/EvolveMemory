@@ -12,6 +12,8 @@ from memory_system import (
     DialogueMemoryExtractor,
     DiskSessionRepository,
     MemoryItem,
+    MemoryUseAction,
+    MemoryUseGate,
     MemorySlotRegistry,
     MemoryStore,
     MemoryType,
@@ -37,6 +39,7 @@ class MemorySystemTest(unittest.TestCase):
         self.inferencer = ProfileInferencer()
         self.write_evaluator = MemoryWriteEvaluator()
         self.retriever = QueryMemoryRetriever()
+        self.use_gate = MemoryUseGate()
         self.policy_engine = ResponsePolicyEngine()
         self.prompt_builder = PromptContextBuilder()
         self.structured_parser = StructuredMemoryParser()
@@ -123,6 +126,45 @@ class MemorySystemTest(unittest.TestCase):
 
         self.assertIn("work_status", keys)
         self.assertIn("communication_style", keys)
+
+    def test_memory_use_gate_suppresses_sensitive_irrelevant_facts(self) -> None:
+        memory = MemoryItem(
+            memory_type=MemoryType.STATE,
+            key="age",
+            value="29",
+            confidence=0.95,
+            source="turn_1",
+            evidence="29岁",
+            valid_from=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+            confirmed_by_user=True,
+            dynamics=StateDynamics.SEMI_STATIC,
+            tags=["sensitive"],
+        )
+
+        result = self.use_gate.select(
+            "给我一点求职建议",
+            [memory],
+            now=datetime(2026, 4, 16, 12, 0, tzinfo=self.tz),
+        )
+
+        self.assertFalse(result.selected)
+        self.assertEqual(result.suppressed[0].action, MemoryUseAction.SUPPRESS)
+
+    def test_memory_use_gate_marks_ongoing_events_for_followup(self) -> None:
+        event = self.extractor.extract(
+            "我最近准备面试。",
+            source="turn_1",
+            timestamp=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+        )[0]
+
+        result = self.use_gate.select(
+            "面试怎么准备？",
+            [event],
+            now=datetime(2026, 4, 17, 9, 0, tzinfo=self.tz),
+        )
+
+        self.assertEqual(result.decisions[0].action, MemoryUseAction.FOLLOW_UP)
+        self.assertEqual(result.decisions[0].layer.value, "event_memory")
 
     def test_prompt_builder_outputs_assembled_prompt(self) -> None:
         turns = [
@@ -289,6 +331,7 @@ class MemoryApiTest(unittest.TestCase):
         query_payload = query_response.json()
 
         self.assertTrue(query_payload["relevant_memories"])
+        self.assertTrue(query_payload["memory_gate"]["selected"])
         self.assertEqual(
             query_payload["response_policy"]["decision_mode"],
             "give_recommendation",
@@ -313,6 +356,7 @@ class MemoryApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIn("assembled_prompt", payload)
+        self.assertIn("[Memory Use Gate]", payload["assembled_prompt"])
         self.assertIn("[Current User Query]", payload["assembled_prompt"])
 
     def test_structured_ingest_and_audit_api(self) -> None:

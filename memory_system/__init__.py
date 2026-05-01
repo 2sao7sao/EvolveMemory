@@ -8,6 +8,13 @@ from .engine import (
     QueryMemoryRetriever,
     ResponsePolicyEngine,
 )
+from .gating import (
+    MemoryGateDecision,
+    MemoryGateResult,
+    MemoryLayer,
+    MemoryUseAction,
+    MemoryUseGate,
+)
 from .persistence import DiskSessionRepository, SQLiteSessionRepository, SessionRepository
 from .prompting import PromptContextBuilder
 from .registry import MemorySlotRegistry, SlotDefinition
@@ -28,9 +35,14 @@ __all__ = [
     "DialogueMemoryExtractor",
     "DiskSessionRepository",
     "MemoryAuditEvent",
+    "MemoryGateDecision",
+    "MemoryGateResult",
     "MemoryItem",
+    "MemoryLayer",
     "MemoryStore",
     "MemoryType",
+    "MemoryUseAction",
+    "MemoryUseGate",
     "MemoryWriteEvaluator",
     "ProfileInferencer",
     "PromptContextBuilder",
