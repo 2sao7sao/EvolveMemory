@@ -3,11 +3,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
+from .registry import MemorySlotRegistry
 from .schema import MemoryItem, MemoryType, StateDynamics
 
 
 class StructuredMemoryParser:
     """Parse model-produced structured memory payloads into MemoryItem objects."""
+
+    def __init__(self, registry: MemorySlotRegistry | None = None) -> None:
+        self.registry = registry or MemorySlotRegistry.default()
 
     def parse(
         self,
@@ -20,26 +24,25 @@ class StructuredMemoryParser:
         memories: list[MemoryItem] = []
         for record in records:
             valid_days = record.get("valid_days")
-            memories.append(
-                MemoryItem(
-                    memory_type=MemoryType(record["type"]),
-                    key=record["key"],
-                    value=record["value"],
-                    confidence=float(record.get("confidence", 0.7)),
-                    source=source,
-                    evidence=record.get("evidence", ""),
-                    valid_from=timestamp,
-                    valid_to=timestamp + timedelta(days=valid_days) if valid_days else None,
-                    confirmed_by_user=bool(record.get("confirmed_by_user", False)),
-                    exclusive_group=record.get("exclusive_group"),
-                    coexistence_rule=record.get("coexistence_rule", "coexist"),
-                    dynamics=StateDynamics(
-                        record.get("dynamics", StateDynamics.NOT_APPLICABLE.value)
-                    ),
-                    tags=list(record.get("tags", [])),
-                    last_updated=timestamp,
-                )
+            memory = MemoryItem(
+                memory_type=MemoryType(record["type"]),
+                key=record["key"],
+                value=record["value"],
+                confidence=float(record.get("confidence", 0.7)),
+                source=source,
+                evidence=record.get("evidence", ""),
+                valid_from=timestamp,
+                valid_to=timestamp + timedelta(days=valid_days) if valid_days else None,
+                confirmed_by_user=bool(record.get("confirmed_by_user", False)),
+                exclusive_group=record.get("exclusive_group"),
+                coexistence_rule=record.get("coexistence_rule", "coexist"),
+                dynamics=StateDynamics(
+                    record.get("dynamics", StateDynamics.NOT_APPLICABLE.value)
+                ),
+                tags=list(record.get("tags", [])),
+                last_updated=timestamp,
             )
+            memories.append(self.registry.apply_defaults(memory))
         return memories
 
 

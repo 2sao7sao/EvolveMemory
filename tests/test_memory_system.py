@@ -12,6 +12,7 @@ from memory_system import (
     DialogueMemoryExtractor,
     DiskSessionRepository,
     MemoryItem,
+    MemorySlotRegistry,
     MemoryStore,
     MemoryType,
     MemoryWriteEvaluator,
@@ -30,6 +31,7 @@ class MemorySystemTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tz = ZoneInfo("Asia/Shanghai")
         self.extractor = DialogueMemoryExtractor()
+        self.registry = MemorySlotRegistry.default()
         self.store = MemoryStore()
         self.inferencer = ProfileInferencer()
         self.write_evaluator = MemoryWriteEvaluator()
@@ -220,6 +222,34 @@ class MemorySystemTest(unittest.TestCase):
         self.assertEqual(len(memories), 1)
         self.assertEqual(memories[0].memory_type, MemoryType.PREFERENCE)
         self.assertEqual(memories[0].key, "detail_preference")
+        self.assertEqual(memories[0].exclusive_group, "detail_preference")
+
+    def test_slot_registry_defines_exclusive_state_rules(self) -> None:
+        relationship = self.registry.get("relationship_status")
+        current_emotion = self.registry.get("current_emotional_state")
+
+        self.assertIsNotNone(relationship)
+        self.assertEqual(relationship.exclusive_group, "relationship_status")
+        self.assertEqual(relationship.coexistence_rule, "mutually_exclusive")
+        self.assertEqual(current_emotion.default_valid_days, 14)
+
+    def test_registry_applies_defaults_to_memory(self) -> None:
+        memory = MemoryItem(
+            memory_type=MemoryType.STATE,
+            key="current_emotional_state",
+            value="anxious",
+            confidence=0.8,
+            source="turn_1",
+            evidence="焦虑",
+            valid_from=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+        )
+
+        enriched = self.registry.apply_defaults(memory)
+
+        self.assertEqual(enriched.exclusive_group, "current_emotional_state")
+        self.assertEqual(enriched.dynamics, StateDynamics.FLUID)
+        self.assertIsNotNone(enriched.valid_to)
+        self.assertIn("sensitive", enriched.tags)
 
 
 class MemoryApiTest(unittest.TestCase):
@@ -311,6 +341,14 @@ class MemoryApiTest(unittest.TestCase):
         ]
         self.assertEqual(len(relationships), 1)
         self.assertEqual(relationships[0]["value"], "dating")
+
+    def test_memory_slots_api(self) -> None:
+        response = self.client.get("/memory-slots")
+
+        self.assertEqual(response.status_code, 200)
+        keys = [slot["key"] for slot in response.json()["slots"]]
+        self.assertIn("relationship_status", keys)
+        self.assertIn("response_opening", keys)
 
 
 if __name__ == "__main__":

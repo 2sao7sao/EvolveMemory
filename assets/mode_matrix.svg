@@ -1,0 +1,43 @@
+<svg width="1200" height="420" viewBox="0 0 1200 420" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Adaptive Memory Engine mode matrix">
+  <rect width="1200" height="420" rx="18" fill="#121516"/>
+  <text x="54" y="64" fill="#f4f0e8" font-family="Arial, sans-serif" font-size="28" font-weight="700">Memory Operation Modes</text>
+  <text x="54" y="94" fill="#aeb9b6" font-family="Arial, sans-serif" font-size="15">Each mode is a separable component in the memory lifecycle.</text>
+
+  <g font-family="Arial, sans-serif">
+    <rect x="54" y="140" width="170" height="180" rx="12" fill="#202627" stroke="#425351"/>
+    <text x="78" y="178" fill="#65d6c7" font-size="18" font-weight="700">Observe</text>
+    <text x="78" y="214" fill="#c0c9c6" font-size="13">Extract candidate</text>
+    <text x="78" y="236" fill="#c0c9c6" font-size="13">memories from turns</text>
+    <text x="78" y="276" fill="#8f9d99" font-size="12">Output: MemoryItem[]</text>
+
+    <rect x="246" y="140" width="170" height="180" rx="12" fill="#202627" stroke="#425351"/>
+    <text x="270" y="178" fill="#d1b15f" font-size="18" font-weight="700">Write</text>
+    <text x="270" y="214" fill="#c0c9c6" font-size="13">Score, accept,</text>
+    <text x="270" y="236" fill="#c0c9c6" font-size="13">reject, or merge</text>
+    <text x="270" y="276" fill="#8f9d99" font-size="12">Output: WriteDecision</text>
+
+    <rect x="438" y="140" width="170" height="180" rx="12" fill="#202627" stroke="#425351"/>
+    <text x="462" y="178" fill="#65d6c7" font-size="18" font-weight="700">Retrieve</text>
+    <text x="462" y="214" fill="#c0c9c6" font-size="13">Select active</text>
+    <text x="462" y="236" fill="#c0c9c6" font-size="13">query memory</text>
+    <text x="462" y="276" fill="#8f9d99" font-size="12">Output: relevant set</text>
+
+    <rect x="630" y="140" width="170" height="180" rx="12" fill="#202627" stroke="#425351"/>
+    <text x="654" y="178" fill="#d1b15f" font-size="18" font-weight="700">Adapt</text>
+    <text x="654" y="214" fill="#c0c9c6" font-size="13">Convert memory</text>
+    <text x="654" y="236" fill="#c0c9c6" font-size="13">to answer policy</text>
+    <text x="654" y="276" fill="#8f9d99" font-size="12">Output: policy</text>
+
+    <rect x="822" y="140" width="170" height="180" rx="12" fill="#202627" stroke="#425351"/>
+    <text x="846" y="178" fill="#65d6c7" font-size="18" font-weight="700">Correct</text>
+    <text x="846" y="214" fill="#c0c9c6" font-size="13">User overrides</text>
+    <text x="846" y="236" fill="#c0c9c6" font-size="13">or retires memory</text>
+    <text x="846" y="276" fill="#8f9d99" font-size="12">Output: new state</text>
+
+    <rect x="1014" y="140" width="132" height="180" rx="12" fill="#202627" stroke="#425351"/>
+    <text x="1038" y="178" fill="#d1b15f" font-size="18" font-weight="700">Audit</text>
+    <text x="1038" y="214" fill="#c0c9c6" font-size="13">Explain lifecycle</text>
+    <text x="1038" y="236" fill="#c0c9c6" font-size="13">changes</text>
+    <text x="1038" y="276" fill="#8f9d99" font-size="12">Output: log</text>
+  </g>
+</svg>

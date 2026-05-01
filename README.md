@@ -89,6 +89,7 @@ The current prototype includes:
 
 - raw Chinese dialogue extraction
 - structured LLM extraction payload parsing
+- declarative memory slot registry
 - write scoring before persistence
 - memory store with exclusive/coexisting memory behavior
 - active-memory validity windows
@@ -106,9 +107,12 @@ The current prototype includes:
 
 ## Current Architecture
 
+<img src="assets/architecture.svg" alt="Adaptive Memory Engine architecture" width="100%" />
+
 ```mermaid
 flowchart TD
     A["Dialogue turn or structured LLM extraction"] --> B["Candidate memory extraction"]
+    A --> R["MemorySlotRegistry"]
     B --> C["MemoryWriteEvaluator"]
     C -->|accepted| D["MemoryStore"]
     C -->|rejected| E["Audit: reject"]
@@ -216,6 +220,8 @@ Current dimensions:
 | `WriteDecision` | `memory_system/schema.py` | Records write score, threshold, factors, and final write decision. |
 | `MemoryAuditEvent` | `memory_system/schema.py` | Explains writes, merges, rejections, retirements, and corrections. |
 | `ResponsePolicy` | `memory_system/schema.py` | Compact answer-control object used by the model-facing layer. |
+| `SlotDefinition` | `memory_system/registry.py` | Declarative definition for one memory slot: type, dynamics, exclusivity, TTL, scoring weights, and sensitivity. |
+| `MemorySlotRegistry` | `memory_system/registry.py` | Central registry of supported memory slots and their default rules. |
 | `DialogueMemoryExtractor` | `memory_system/engine.py` | Rule-based Chinese dialogue extractor for the current prototype. |
 | `MemoryWriteEvaluator` | `memory_system/engine.py` | Scores candidate memories before persistence. |
 | `MemoryStore` | `memory_system/engine.py` | Applies active-memory, merge, retirement, correction, and audit rules. |
@@ -314,7 +320,9 @@ Low-value examples:
 
 ## State Machine Rules
 
-The store uses active-time windows rather than deleting history.
+The store uses active-time windows rather than deleting history. Slot defaults
+come from `MemorySlotRegistry`, so common state-machine behavior is now
+declared centrally instead of being only embedded in extraction logic.
 
 Mutually exclusive examples:
 
@@ -337,6 +345,8 @@ or later than the current timestamp.
 ---
 
 ## Mode Presets
+
+<img src="assets/mode_matrix.svg" alt="Adaptive Memory Engine mode matrix" width="100%" />
 
 The prototype can be reasoned about through operational modes:
 
@@ -421,8 +431,8 @@ has important gaps.
 | Spec area | Current state | Gap to close |
 | --- | --- | --- |
 | Events | Basic event memory exists. | Need richer event ontology, causal links, follow-up tasks, and event-to-state transitions. |
-| Static / dynamic states | `static`, `semi_static`, and `fluid` dynamics exist. | Need declarative state schema, TTL policy per slot, and stronger conditional coexistence rules. |
-| Mutual exclusion | Implemented through `exclusive_group`. | Need configurable slot registry instead of hardcoded extraction choices. |
+| Static / dynamic states | `static`, `semi_static`, `fluid`, and registry defaults exist. | Need richer TTL policies, transition rules, and state history summarization. |
+| Mutual exclusion | Implemented through `exclusive_group` and `MemorySlotRegistry`. | Need configurable project/user-level registry loading instead of only built-in defaults. |
 | Interests | Long-term and short-term interest slots exist. | Need recency scoring, frequency tracking, and interest decay. |
 | Profile | Basic inferred profile dimensions exist. | Need psychology-backed trait model, confidence aggregation, evidence accumulation, and user-visible explanations. |
 | Response adaptation | `ResponsePolicy` controls tone, detail, structure, decision mode, pace, empathy, and follow-up. | Need policy-to-answer generation, evaluation, and per-domain policy tuning. |
@@ -446,6 +456,12 @@ Health check:
 
 ```bash
 curl http://127.0.0.1:8000/health
+```
+
+Inspect supported memory slots:
+
+```bash
+curl http://127.0.0.1:8000/memory-slots
 ```
 
 Ingest a raw dialogue turn:

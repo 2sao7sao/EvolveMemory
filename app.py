@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from memory_system.registry import MemorySlotRegistry
 from memory_system.service import SessionMemoryRuntime
 from memory_system.schema import MemoryType, StateDynamics
 
@@ -100,6 +101,11 @@ def normalize_timestamp(value: datetime | None) -> datetime:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/memory-slots")
+def memory_slots() -> dict[str, Any]:
+    return {"slots": MemorySlotRegistry.default().to_dict()}
 
 
 @app.post("/sessions/{session_id}/ingest")

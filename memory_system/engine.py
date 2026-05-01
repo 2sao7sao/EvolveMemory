@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Iterable
 
+from .registry import MemorySlotRegistry
 from .schema import (
     AuditAction,
     MemoryAuditEvent,
@@ -172,29 +173,24 @@ class MemoryStore:
 
 
 class MemoryWriteEvaluator:
-    def __init__(self, threshold: float = 0.16) -> None:
+    def __init__(
+        self,
+        threshold: float = 0.16,
+        registry: MemorySlotRegistry | None = None,
+    ) -> None:
         self.threshold = threshold
-        self.reuse_by_key = {
-            "communication_style": 0.95,
-            "detail_preference": 0.95,
-            "response_opening": 0.92,
-            "explanation_structure": 0.9,
-            "decision_preference": 0.9,
-            "relationship_status": 0.7,
-            "work_status": 0.85,
-            "profession": 0.78,
-            "current_emotional_state": 0.9,
-            "current_bandwidth": 0.8,
-            "interest_long_term": 0.68,
-            "interest_short_term": 0.62,
-            "life_event": 0.74,
-        }
+        self.registry = registry or MemorySlotRegistry.default()
 
     def evaluate(self, memory: MemoryItem) -> WriteDecision:
+        definition = self.registry.get(memory.key)
         factors = {
             "stability": self._stability(memory),
-            "reuse": self.reuse_by_key.get(memory.key, 0.6),
-            "personalization_gain": self._personalization_gain(memory),
+            "reuse": definition.reuse if definition else 0.6,
+            "personalization_gain": (
+                definition.personalization_gain
+                if definition
+                else self._personalization_gain(memory)
+            ),
             "confidence": memory.confidence,
         }
         score = 1.0
@@ -250,6 +246,9 @@ class DialogueMemoryExtractor:
     LONG_TERM_INTERESTS = ("喜欢", "一直喜欢", "平时喜欢")
     SHORT_TERM_INTERESTS = ("最近在学", "最近迷上", "刚开始学", "最近开始")
 
+    def __init__(self, registry: MemorySlotRegistry | None = None) -> None:
+        self.registry = registry or MemorySlotRegistry.default()
+
     def extract(
         self,
         text: str,
@@ -287,7 +286,7 @@ class DialogueMemoryExtractor:
         valid_to = None
         if valid_days is not None:
             valid_to = timestamp + timedelta(days=valid_days)
-        return MemoryItem(
+        memory = MemoryItem(
             memory_type=memory_type,
             key=key,
             value=value,
@@ -302,6 +301,7 @@ class DialogueMemoryExtractor:
             dynamics=dynamics,
             tags=tags or [],
         )
+        return self.registry.apply_defaults(memory)
 
     def _extract_age(
         self,

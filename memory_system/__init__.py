@@ -10,6 +10,7 @@ from .engine import (
 )
 from .persistence import DiskSessionRepository
 from .prompting import PromptContextBuilder
+from .registry import MemorySlotRegistry, SlotDefinition
 from .schema import (
     AuditAction,
     MemoryAuditEvent,
@@ -37,8 +38,10 @@ __all__ = [
     "ResponsePolicy",
     "ResponsePolicyEngine",
     "SessionMemoryRuntime",
+    "SlotDefinition",
     "StateDynamics",
     "StructuredMemoryParser",
     "WriteDecision",
     "memory_extraction_schema",
+    "MemorySlotRegistry",
 ]

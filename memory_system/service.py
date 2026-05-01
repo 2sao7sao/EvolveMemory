@@ -14,6 +14,7 @@ from .engine import (
 )
 from .persistence import DiskSessionRepository
 from .prompting import PromptContextBuilder
+from .registry import MemorySlotRegistry
 from .schema import MemoryItem, MemoryType, StateDynamics
 from .structured import StructuredMemoryParser
 
@@ -22,16 +23,23 @@ from .structured import StructuredMemoryParser
 class SessionMemoryRuntime:
     session_id: str | None = None
     repository: DiskSessionRepository | None = None
+    registry: MemorySlotRegistry = field(default_factory=MemorySlotRegistry.default)
     store: MemoryStore = field(default_factory=MemoryStore)
-    extractor: DialogueMemoryExtractor = field(default_factory=DialogueMemoryExtractor)
-    write_evaluator: MemoryWriteEvaluator = field(default_factory=MemoryWriteEvaluator)
+    extractor: DialogueMemoryExtractor | None = None
+    write_evaluator: MemoryWriteEvaluator | None = None
     inferencer: ProfileInferencer = field(default_factory=ProfileInferencer)
     retriever: QueryMemoryRetriever = field(default_factory=QueryMemoryRetriever)
     policy_engine: ResponsePolicyEngine = field(default_factory=ResponsePolicyEngine)
     prompt_builder: PromptContextBuilder = field(default_factory=PromptContextBuilder)
-    structured_parser: StructuredMemoryParser = field(default_factory=StructuredMemoryParser)
+    structured_parser: StructuredMemoryParser | None = None
 
     def __post_init__(self) -> None:
+        if self.extractor is None:
+            self.extractor = DialogueMemoryExtractor(self.registry)
+        if self.write_evaluator is None:
+            self.write_evaluator = MemoryWriteEvaluator(registry=self.registry)
+        if self.structured_parser is None:
+            self.structured_parser = StructuredMemoryParser(self.registry)
         if self.repository and self.session_id:
             self.store = self.repository.load_store(self.session_id)
 
@@ -119,6 +127,7 @@ class SessionMemoryRuntime:
             tags=tags or [],
             last_updated=timestamp,
         )
+        self.registry.apply_defaults(memory)
         self.store.correct(memory, reason="explicit user correction")
         self._persist()
         return {
@@ -153,3 +162,6 @@ class SessionMemoryRuntime:
 
     def audit_log(self) -> list[dict]:
         return self.store.audit_to_dict()
+
+    def slot_registry(self) -> list[dict]:
+        return self.registry.to_dict()
