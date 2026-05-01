@@ -29,6 +29,8 @@ from memory_system import (
     ProfileInferencer,
     PromptContextBuilder,
     QueryMemoryRetriever,
+    QueryIntentClassifier,
+    RetrievalPlanner,
     ResponsePolicyEngine,
     RuleMemoryProposalExtractor,
     Sensitivity,
@@ -490,6 +492,36 @@ class MemorySystemTest(unittest.TestCase):
             self.assertTrue(persisted)
             self.assertEqual(repo.list_records(user_id="user-1")[0].key, "relationship_status")
 
+    def test_normalized_sqlite_repository_persists_event_states(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+            turn = TurnPreprocessor().preprocess(
+                text="我最近准备面试。",
+                timestamp=timestamp,
+                turn_id="turn_1",
+            )
+            records = RuleMemoryProposalExtractor().propose(
+                turn,
+                user_id="user-1",
+                session_id="session-1",
+            )
+            event = CareerEventSkill().detect(records)[0]
+
+            repo.upsert_event_state(event, user_id="user-1")
+            loaded = repo.list_event_states(user_id="user-1")
+
+            self.assertEqual(loaded[0].event_type, "career.interview_preparation")
+            self.assertEqual(loaded[0].stage, "preparing")
+
+    def test_query_intent_classifier_and_retrieval_planner(self) -> None:
+        intent = QueryIntentClassifier().classify("面试怎么准备？")
+        plan = RetrievalPlanner().plan("面试怎么准备？", max_prompt_memories=8)
+
+        self.assertEqual(intent.name, "career_advice")
+        self.assertIn("event_state", plan.retrieval_modes)
+        self.assertIn(MemoryLayer.EPISODIC_EVENT, plan.include_layers)
+
     def test_write_policy_rejects_low_value_memory(self) -> None:
         memory = MemoryItem(
             memory_type=MemoryType.STATE,
@@ -692,10 +724,11 @@ class MemoryApiTest(unittest.TestCase):
         self.assertIn("response_opening", keys)
 
     def test_v2_ingest_and_memory_query_api(self) -> None:
+        session_id = f"phase2-{uuid4().hex}"
         ingest = self.client.post(
             "/v2/users/test-user/turns/ingest",
             json={
-                "session_id": "phase2",
+                "session_id": session_id,
                 "role": "user",
                 "text": "我最近准备面试，有点焦虑。回答直接一点，先给结论。",
                 "options": {"return_candidates": True},
@@ -708,11 +741,12 @@ class MemoryApiTest(unittest.TestCase):
         self.assertTrue(ingest_payload["operations"])
         self.assertTrue(ingest_payload["event_states"])
         self.assertTrue(ingest_payload["persisted_records"])
+        self.assertTrue(ingest_payload["persisted_event_states"])
 
         query = self.client.post(
             "/v2/users/test-user/memory/query",
             json={
-                "session_id": "phase2",
+                "session_id": session_id,
                 "query": "面试怎么准备？",
                 "options": {"max_prompt_memories": 8, "include_debug": True},
             },
@@ -722,12 +756,91 @@ class MemoryApiTest(unittest.TestCase):
         payload = query.json()
         self.assertIn("compiled_context", payload)
         self.assertIn("normalized_sqlite", payload["retrieval_plan"]["retrieval_modes"])
+        self.assertEqual(payload["retrieval_plan"]["intent"]["name"], "career_advice")
         self.assertTrue(payload["gate"]["selected"])
         self.assertTrue(payload["compiled_context"]["event_followups"])
+
+        events = self.client.get("/v2/users/test-user/memory/events")
+        self.assertEqual(events.status_code, 200)
+        self.assertTrue(events.json()["event_states"])
 
         audit = self.client.get("/v2/users/test-user/memory/audit")
         self.assertEqual(audit.status_code, 200)
         self.assertTrue(audit.json()["audit_events"])
+
+    def test_v2_settings_api_can_disable_memory_key(self) -> None:
+        user_id = f"settings-user-{uuid4().hex}"
+        session_id = f"settings-session-{uuid4().hex}"
+        settings = self.client.put(
+            f"/v2/users/{user_id}/memory/settings",
+            json={"disabled_keys": ["communication_style"]},
+        )
+        self.assertEqual(settings.status_code, 200)
+        self.assertIn("communication_style", settings.json()["settings"]["disabled_keys"])
+
+        ingest = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "回答直接一点。",
+                "options": {"return_candidates": True},
+            },
+        )
+
+        self.assertEqual(ingest.status_code, 200)
+        self.assertEqual(ingest.json()["operations"][0]["operation"], "reject")
+        self.assertEqual(ingest.json()["persisted_records"], [])
+
+    def test_v2_delete_and_forget_all_do_not_fallback_to_legacy_memory(self) -> None:
+        user_id = f"delete-user-{uuid4().hex}"
+        session_id = f"delete-session-{uuid4().hex}"
+        ingest = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "记住，回答直接一点。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(ingest.status_code, 200)
+        memory_id = ingest.json()["persisted_records"][0]["id"]
+
+        deleted = self.client.post(
+            f"/v2/users/{user_id}/memory/{memory_id}/delete",
+            json={"reason": "test delete"},
+        )
+        self.assertEqual(deleted.status_code, 200)
+
+        query = self.client.post(
+            f"/v2/users/{user_id}/memory/query",
+            json={"session_id": session_id, "query": "我喜欢你怎么回答？"},
+        )
+        self.assertEqual(query.status_code, 200)
+        self.assertEqual(query.json()["candidates"], [])
+
+        second_ingest = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "记住，先给结论。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(second_ingest.status_code, 200)
+        forget = self.client.post(
+            f"/v2/users/{user_id}/memory/forget-all",
+            json={"session_id": session_id, "reason": "test forget all"},
+        )
+        self.assertGreaterEqual(forget.json()["deleted_count"], 1)
+        final_query = self.client.post(
+            f"/v2/users/{user_id}/memory/query",
+            json={"session_id": session_id, "query": "我喜欢你怎么回答？"},
+        )
+        self.assertEqual(final_query.status_code, 200)
+        self.assertEqual(final_query.json()["candidates"], [])
 
     def test_v2_ingest_honors_do_not_remember_command(self) -> None:
         ingest = self.client.post(

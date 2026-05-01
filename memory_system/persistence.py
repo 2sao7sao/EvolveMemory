@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from .engine import MemoryStore
 from .models import (
+    EventMemoryState,
     MemoryEvidence,
     MemoryOperation,
     MemoryOperationType,
@@ -18,6 +19,7 @@ from .models import (
     MemoryStatus,
 )
 from .schema import MemoryAuditEvent, MemoryItem
+from .settings import UserMemorySettings
 
 
 class SessionRepository(Protocol):
@@ -232,6 +234,37 @@ class NormalizedSQLiteMemoryRepository:
         with self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
         return [self._row_to_record(row) for row in rows]
+
+    def get_user_settings(self, user_id: str) -> UserMemorySettings:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM memory_user_settings WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if row is None:
+            return UserMemorySettings()
+        return UserMemorySettings.from_dict(json.loads(row["payload_json"]))
+
+    def upsert_user_settings(
+        self,
+        user_id: str,
+        settings: UserMemorySettings,
+        *,
+        updated_at: datetime | None = None,
+    ) -> UserMemorySettings:
+        timestamp = (updated_at or datetime.now(timezone.utc)).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO memory_user_settings (user_id, payload_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                (user_id, json.dumps(settings.to_dict(), ensure_ascii=False), timestamp),
+            )
+        return settings
 
     def apply_operation(
         self,
@@ -520,6 +553,175 @@ class NormalizedSQLiteMemoryRepository:
             )
         return cursor.rowcount > 0
 
+    def mark_record_deleted(
+        self,
+        memory_id: str,
+        *,
+        user_id: str,
+        reason: str = "user requested delete",
+        updated_at: datetime | None = None,
+    ) -> bool:
+        timestamp = updated_at or datetime.now(timezone.utc)
+        existing = self.get_record(memory_id)
+        if existing is None or existing.user_id != user_id:
+            return False
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE memory_records
+                SET status = ?, updated_at = ?
+                WHERE id = ? AND user_id = ?
+                """,
+                (MemoryStatus.DELETED.value, timestamp.isoformat(), memory_id, user_id),
+            )
+        if cursor.rowcount <= 0:
+            return False
+        self.record_lifecycle_audit(
+            user_id=user_id,
+            action="deleted",
+            memory_id=memory_id,
+            before=existing.model_dump(mode="json"),
+            after=None,
+            reason=reason,
+            created_at=timestamp,
+        )
+        return True
+
+    def forget_all(
+        self,
+        *,
+        user_id: str,
+        session_id: str | None = None,
+        reason: str = "user requested forget-all",
+        updated_at: datetime | None = None,
+    ) -> int:
+        timestamp = updated_at or datetime.now(timezone.utc)
+        records = self.list_records(
+            user_id=user_id,
+            session_id=session_id,
+            status=MemoryStatus.ACTIVE,
+            limit=10000,
+        )
+        if not records:
+            return 0
+        query = (
+            "UPDATE memory_records SET status = ?, updated_at = ? "
+            "WHERE user_id = ? AND status = ?"
+        )
+        params: list[object] = [
+            MemoryStatus.DELETED.value,
+            timestamp.isoformat(),
+            user_id,
+            MemoryStatus.ACTIVE.value,
+        ]
+        if session_id is not None:
+            query += " AND session_id = ?"
+            params.append(session_id)
+        with self._connect() as conn:
+            cursor = conn.execute(query, params)
+        self.record_lifecycle_audit(
+            user_id=user_id,
+            action="forget_all",
+            memory_id=None,
+            before={"memory_ids": [str(record.id) for record in records]},
+            after=None,
+            reason=reason,
+            created_at=timestamp,
+        )
+        return cursor.rowcount
+
+    def record_lifecycle_audit(
+        self,
+        *,
+        user_id: str,
+        action: str,
+        memory_id: str | None,
+        before: dict | None,
+        after: dict | None,
+        reason: str,
+        created_at: datetime | None = None,
+    ) -> dict[str, object]:
+        timestamp = created_at or datetime.now(timezone.utc)
+        payload: dict[str, object] = {
+            "id": str(uuid4()),
+            "tenant_id": "default",
+            "user_id": user_id,
+            "actor": "user",
+            "action": action,
+            "memory_id": memory_id,
+            "before_json": json.dumps(before, ensure_ascii=False) if before else None,
+            "after_json": json.dumps(after, ensure_ascii=False) if after else None,
+            "reason": reason,
+            "policy_version": "user-governance-v2.0",
+            "created_at": timestamp.isoformat(),
+        }
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO memory_audit_events (
+                    id, tenant_id, user_id, actor, action, memory_id, before_json,
+                    after_json, reason, policy_version, created_at
+                )
+                VALUES (
+                    :id, :tenant_id, :user_id, :actor, :action, :memory_id, :before_json,
+                    :after_json, :reason, :policy_version, :created_at
+                )
+                """,
+                payload,
+            )
+        return payload
+
+    def upsert_event_state(
+        self,
+        event: EventMemoryState,
+        *,
+        user_id: str,
+    ) -> EventMemoryState:
+        payload = event.model_dump(mode="json")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO event_memory_states (
+                    memory_id, user_id, event_type, status, stage, payload_json, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(memory_id) DO UPDATE SET
+                    event_type = excluded.event_type,
+                    status = excluded.status,
+                    stage = excluded.stage,
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    str(event.memory_id),
+                    user_id,
+                    event.event_type,
+                    event.status,
+                    event.stage,
+                    json.dumps(payload, ensure_ascii=False),
+                    event.updated_at.isoformat(),
+                ),
+            )
+        return event
+
+    def list_event_states(
+        self,
+        *,
+        user_id: str,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[EventMemoryState]:
+        query = "SELECT payload_json FROM event_memory_states WHERE user_id = ?"
+        params: list[object] = [user_id]
+        if status is not None:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [EventMemoryState.model_validate(json.loads(row["payload_json"])) for row in rows]
+
     def migrate_store(
         self,
         *,
@@ -726,5 +928,33 @@ class NormalizedSQLiteMemoryRepository:
                 """
                 CREATE INDEX IF NOT EXISTS idx_review_user_status
                 ON memory_review_queue(user_id, status, created_at)
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS memory_user_settings (
+                    user_id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS event_memory_states (
+                    memory_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    stage TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_event_state_user_status
+                ON event_memory_states(user_id, status, updated_at)
                 """
             )

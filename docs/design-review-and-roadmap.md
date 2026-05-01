@@ -55,6 +55,7 @@ Current implementation:
 - `WeightedMemoryWriteEvaluatorV2` and `MemoryOperationPlanner` add deterministic write-governance planning.
 - v2 ingest now connects preprocessing, proposal extraction, write planning, normalized persistence, and career event detection.
 - v2 query now prefers normalized records when available.
+- User settings, normalized delete, forget-all, review queue, and event state persistence now exist as APIs.
 
 Gap:
 
@@ -82,7 +83,7 @@ Current implementation:
 
 Gap:
 
-- Query intent classification is still rule-like and implicit.
+- Query intent classification and retrieval planning exist as deterministic rules, but not yet as learned or embedding-backed retrieval.
 - Hybrid retrieval with embeddings is not implemented.
 - Gate thresholds are hardcoded, not learned or user-configurable.
 - The system does not yet evaluate downstream answer quality.
@@ -90,7 +91,7 @@ Gap:
 
 ## 2. Current Code Review Findings
 
-### P1: Phase 2 Runtime Still Needs Review Governance
+### P1: Phase 2 Runtime Still Needs Governance UX And Hardening
 
 The v2 ingest path now connects:
 
@@ -103,18 +104,19 @@ TurnPreprocessor
 ```
 
 Operations that require confirmation are now stored in a review queue and can
-be approved or rejected through API. The remaining P1 gap is governance policy:
-memory settings, batch review, explanations, and normalized correction / delete
-flows need to be exposed together.
+be approved or rejected through API. Memory settings, single-record delete,
+forget-all, and event state APIs also exist. The remaining P1 gap is governance
+UX and hardening: batch review, explanations, normalized correction, retention,
+and export need to be exposed together.
 
 ### P1: User Governance Is Still Incomplete
 
-The system has correction, retirement, settings models, sensitivity, and tombstone delete,
-but does not yet expose full user governance:
+The system has correction, retirement, settings APIs, sensitivity, review queue,
+single-record tombstone delete, and forget-all. It still lacks:
 
 - review suggestions with explanations
-- memory settings API
-- forget-all endpoint over normalized records
+- settings UI / client flow
+- normalized correction endpoint
 - audit export
 
 This is the biggest product gap before the system feels controllable to users.
@@ -156,16 +158,16 @@ should cover:
 
 ## 3. Recommended Next Iteration Order
 
-1. Add memory settings APIs.
-2. Add `forget-all` and normalized delete semantics.
-3. Add event state persistence and `CareerEventSkill` integration.
-4. Add query intent classifier and retrieval planner.
-5. Add embedding provider interface and hybrid retrieval.
-6. Add LLM proposal extractor interface with JSON validation and repair.
-7. Add more event skills.
-8. Add migration CLI from legacy session payloads to normalized records.
-9. Add sensitive field encryption and retention enforcement.
-10. Expand eval harness from smoke tests to quality metrics.
+1. Add normalized correction endpoint and before/after review diffs.
+2. Add embedding provider interface and hybrid retrieval.
+3. Add LLM proposal extractor interface with JSON validation and repair.
+4. Add more event skills.
+5. Add migration CLI from legacy session payloads to normalized records.
+6. Add sensitive field encryption and retention enforcement.
+7. Add audit export and batch review workflows.
+8. Expand eval harness from smoke tests to quality metrics.
+9. Add downstream answer-quality evals.
+10. Add UI examples for settings, review queue, and memory inspection.
 
 ## 4. Summary
 

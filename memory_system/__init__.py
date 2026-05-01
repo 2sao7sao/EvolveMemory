@@ -48,6 +48,7 @@ from .persistence import (
 )
 from .prompting import PromptContextBuilder
 from .registry import MemorySlotRegistry, SlotDefinition
+from .retrieval import QueryIntent, QueryIntentClassifier, RetrievalPlan, RetrievalPlanner
 from .schema import (
     AuditAction,
     MemoryAuditEvent,
@@ -105,6 +106,10 @@ __all__ = [
     "PromptContextBuilder",
     "PromptVisibility",
     "QueryMemoryRetriever",
+    "QueryIntent",
+    "QueryIntentClassifier",
+    "RetrievalPlan",
+    "RetrievalPlanner",
     "ResponsePolicy",
     "ResponsePolicyEngine",
     "RuleMemoryProposalExtractor",
