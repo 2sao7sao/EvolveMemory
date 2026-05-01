@@ -13,6 +13,7 @@ from memory_system import (
     DialogueMemoryExtractor,
     DiskSessionRepository,
     CareerEventSkill,
+    EventSkillRegistry,
     MemoryOperationPlanner,
     MemoryCommand,
     MemoryCommandDetector,
@@ -514,6 +515,59 @@ class MemorySystemTest(unittest.TestCase):
             self.assertEqual(loaded[0].event_type, "career.interview_preparation")
             self.assertEqual(loaded[0].stage, "preparing")
 
+    def test_event_skill_registry_detects_learning_and_life_events(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        turn = TurnPreprocessor().preprocess(
+            text="我准备考研，最近分手了。",
+            timestamp=timestamp,
+            turn_id="turn_1",
+        )
+        records = RuleMemoryProposalExtractor().propose(
+            turn,
+            user_id="user-1",
+            session_id="session-1",
+        )
+
+        event_types = {event.event_type for event in EventSkillRegistry().detect(records)}
+
+        self.assertIn("learning.exam_preparation", event_types)
+        self.assertIn("life.relationship_change", event_types)
+
+    def test_normalized_sqlite_repository_corrects_record_and_exports_audit(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+            turn = TurnPreprocessor().preprocess(
+                text="记住，回答直接一点。",
+                timestamp=timestamp,
+                turn_id="turn_1",
+            )
+            records = RuleMemoryProposalExtractor().propose(
+                turn,
+                user_id="user-1",
+                session_id="session-1",
+            )
+            operations = MemoryOperationPlanner().plan(
+                records,
+                [],
+                WritePolicyContext(user_command="remember"),
+            )
+            created = repo.apply_operations(operations, created_at=timestamp)[0]
+
+            corrected = repo.correct_record(
+                str(created.id),
+                user_id="user-1",
+                value="slow",
+                evidence="我更正一下，慢慢讲。",
+                corrected_at=timestamp,
+            )
+            export = repo.export_user_memory(user_id="user-1")
+
+            self.assertIsNotNone(corrected)
+            self.assertEqual(corrected.value, "slow")
+            self.assertEqual(repo.list_records(user_id="user-1")[0].value, "slow")
+            self.assertTrue(export["audit_events"])
+
     def test_query_intent_classifier_and_retrieval_planner(self) -> None:
         intent = QueryIntentClassifier().classify("面试怎么准备？")
         plan = RetrievalPlanner().plan("面试怎么准备？", max_prompt_memories=8)
@@ -841,6 +895,59 @@ class MemoryApiTest(unittest.TestCase):
         )
         self.assertEqual(final_query.status_code, 200)
         self.assertEqual(final_query.json()["candidates"], [])
+
+    def test_v2_correct_memory_and_audit_export_api(self) -> None:
+        user_id = f"correct-user-{uuid4().hex}"
+        session_id = f"correct-session-{uuid4().hex}"
+        ingest = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "记住，回答直接一点。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(ingest.status_code, 200)
+        memory_id = ingest.json()["persisted_records"][0]["id"]
+
+        corrected = self.client.post(
+            f"/v2/users/{user_id}/memory/{memory_id}/correct",
+            json={"value": "slow", "evidence": "我更正一下，慢慢讲。"},
+        )
+        self.assertEqual(corrected.status_code, 200)
+        self.assertEqual(corrected.json()["corrected_memory"]["value"], "slow")
+
+        export = self.client.get(f"/v2/users/{user_id}/memory/audit/export")
+        self.assertEqual(export.status_code, 200)
+        self.assertTrue(export.json()["memory_records"])
+        self.assertTrue(export.json()["audit_events"])
+
+    def test_v2_review_queue_contains_before_after_diff(self) -> None:
+        user_id = f"diff-user-{uuid4().hex}"
+        session_id = f"diff-session-{uuid4().hex}"
+        self.client.put(
+            f"/v2/users/{user_id}/memory/settings",
+            json={"review_required_for_layers": ["preference"]},
+        )
+        ingest = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "记住，回答直接一点。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(ingest.status_code, 200)
+        self.assertEqual(ingest.json()["operations"][0]["operation"], "ask_user_confirmation")
+
+        queue = self.client.get(f"/v2/users/{user_id}/memory/review-queue")
+        self.assertEqual(queue.status_code, 200)
+        item = queue.json()["review_items"][0]
+
+        self.assertIn("candidate", item)
+        self.assertIn("before_after_diff", item)
 
     def test_v2_ingest_honors_do_not_remember_command(self) -> None:
         ingest = self.client.post(

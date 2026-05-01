@@ -105,30 +105,30 @@ TurnPreprocessor
 
 Operations that require confirmation are now stored in a review queue and can
 be approved or rejected through API. Memory settings, single-record delete,
-forget-all, and event state APIs also exist. The remaining P1 gap is governance
-UX and hardening: batch review, explanations, normalized correction, retention,
-and export need to be exposed together.
+normalized correction, forget-all, audit export, and event state APIs also
+exist. The remaining P1 gap is governance UX and hardening: batch review,
+explanations, retention, encryption, and UI flows need to be exposed together.
 
 ### P1: User Governance Is Still Incomplete
 
 The system has correction, retirement, settings APIs, sensitivity, review queue,
-single-record tombstone delete, and forget-all. It still lacks:
+single-record tombstone delete, normalized correction, forget-all, and audit
+export. It still lacks:
 
 - review suggestions with explanations
 - settings UI / client flow
-- normalized correction endpoint
-- audit export
+- batch review workflow
+- retention enforcement
 
 This is the biggest product gap before the system feels controllable to users.
 
 ### P2: Event Memory Needs More Domain Skills
 
-`CareerEventSkill` proves the event-state-machine direction, but the original design
-requires event memory to be a general mechanism. Next skills should be:
+`CareerEventSkill`, `LearningEventSkill`, and `LifeEventSkill` prove the
+event-state-machine direction, but the original design requires event memory to
+be a general mechanism. Next skills should be:
 
-- `learning_event_skill`
 - `project_event_skill`
-- `life_event_skill`
 - `relationship_event_skill` with stricter privacy gates
 
 ### P2: Profile Inference Is Too Shallow
@@ -158,16 +158,16 @@ should cover:
 
 ## 3. Recommended Next Iteration Order
 
-1. Add normalized correction endpoint and before/after review diffs.
-2. Add embedding provider interface and hybrid retrieval.
-3. Add LLM proposal extractor interface with JSON validation and repair.
-4. Add more event skills.
-5. Add migration CLI from legacy session payloads to normalized records.
-6. Add sensitive field encryption and retention enforcement.
-7. Add audit export and batch review workflows.
-8. Expand eval harness from smoke tests to quality metrics.
-9. Add downstream answer-quality evals.
-10. Add UI examples for settings, review queue, and memory inspection.
+1. Add embedding provider interface and hybrid retrieval.
+2. Add LLM proposal extractor interface with JSON validation and repair.
+3. Add project and stricter relationship event skills.
+4. Add migration CLI from legacy session payloads to normalized records.
+5. Add sensitive field encryption and retention enforcement.
+6. Add batch review workflows.
+7. Expand eval harness from smoke tests to quality metrics.
+8. Add downstream answer-quality evals.
+9. Add UI examples for settings, review queue, and memory inspection.
+10. Add policy/version migration support for normalized tables.
 
 ## 4. Summary
 

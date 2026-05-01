@@ -190,8 +190,9 @@ compatibility:
 - `TurnPreprocessor`, `MemoryCommandDetector`, `SensitivityClassifier`, and
   `RuleMemoryProposalExtractor` add the first Phase 2 proposal-extraction
   pipeline while keeping the LLM extractor boundary dependency-free.
-- `CareerEventSkill` adds the first event-state skill for interview/job-search
-  progress detection and follow-up eligibility.
+- `CareerEventSkill`, `LearningEventSkill`, and `LifeEventSkill` add the first
+  event-state skills for career, exam-prep, relationship-change, relocation,
+  and onboarding follow-up.
 - `/v2/users/{user_id}/turns/ingest`, `/v2/users/{user_id}/memory/query`, and
   `/v2/users/{user_id}/prompt-context` expose the Phase 2 API shape. v2 ingest
   now persists planned operations to normalized SQLite and v2 query prefers
@@ -202,8 +203,12 @@ compatibility:
   approve/reject flow for memories that require user confirmation.
 - `/v2/users/{user_id}/memory/settings`,
   `/v2/users/{user_id}/memory/{memory_id}/delete`,
+  `/v2/users/{user_id}/memory/{memory_id}/correct`,
   `/v2/users/{user_id}/memory/forget-all`, and
   `/v2/users/{user_id}/memory/events` add user-governance and event-state APIs.
+- `/v2/users/{user_id}/memory/audit/export` exports normalized records,
+  settings, review items, event states, and audit events for inspection or
+  portability.
 - `QueryIntentClassifier` and `RetrievalPlanner` add the first deterministic
   intent-aware retrieval plan before the gate.
 - `evals/runner.py` adds the first gate evaluation smoke suite.

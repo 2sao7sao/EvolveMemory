@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from memory_system.events import CareerEventSkill
+from memory_system.events import EventSkillRegistry
 from memory_system.extraction import MemoryCommand, RuleMemoryProposalExtractor, TurnPreprocessor
 from memory_system.models import (
     MemoryLayer,
@@ -106,6 +106,13 @@ class V2ForgetAllRequest(BaseModel):
 
 class V2DeleteMemoryRequest(BaseModel):
     reason: str = "user requested delete"
+    timestamp: datetime | None = None
+
+
+class V2CorrectMemoryRequest(BaseModel):
+    value: Any
+    evidence: str
+    confidence: float = Field(1.0, ge=0.0, le=1.0)
     timestamp: datetime | None = None
 
 
@@ -413,7 +420,7 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
             settings=settings,
         ),
     )
-    event_states = CareerEventSkill().detect(candidates)
+    event_states = EventSkillRegistry().detect(candidates)
     can_v2_autowrite = request.options.auto_write and preprocessed_turn.memory_command not in {
         MemoryCommand.DO_NOT_REMEMBER,
         MemoryCommand.FORGET,
@@ -628,6 +635,25 @@ def v2_delete_memory(
     return {"deleted": True, "memory_id": memory_id}
 
 
+@app.post("/v2/users/{user_id}/memory/{memory_id}/correct")
+def v2_correct_memory(
+    user_id: str,
+    memory_id: str,
+    request: V2CorrectMemoryRequest,
+) -> dict[str, Any]:
+    corrected = build_normalized_repository().correct_record(
+        memory_id,
+        user_id=user_id,
+        value=request.value,
+        evidence=request.evidence,
+        confidence=request.confidence,
+        corrected_at=normalize_timestamp(request.timestamp),
+    )
+    if corrected is None:
+        raise HTTPException(status_code=404, detail="Memory not found.")
+    return {"corrected_memory": record_to_dict(corrected)}
+
+
 @app.post("/v2/users/{user_id}/memory/forget-all")
 def v2_forget_all(user_id: str, request: V2ForgetAllRequest) -> dict[str, Any]:
     deleted_count = build_normalized_repository().forget_all(
@@ -647,6 +673,11 @@ def v2_memory_audit(user_id: str, limit: int = 100) -> dict[str, Any]:
             limit=limit,
         )
     }
+
+
+@app.get("/v2/users/{user_id}/memory/audit/export")
+def v2_memory_audit_export(user_id: str) -> dict[str, Any]:
+    return build_normalized_repository().export_user_memory(user_id=user_id)
 
 
 @app.get("/v2/users/{user_id}/memory/events")

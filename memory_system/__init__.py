@@ -9,7 +9,7 @@ from .engine import (
     ResponsePolicyEngine,
 )
 from .context import CompiledMemoryContext, ContextCompiler
-from .events import CareerEventSkill
+from .events import CareerEventSkill, EventSkillRegistry, LearningEventSkill, LifeEventSkill
 from .extraction import (
     LLMMemoryProposalExtractor,
     MemoryCommand,
@@ -80,6 +80,7 @@ __all__ = [
     "DialogueMemoryExtractor",
     "DiskSessionRepository",
     "EventMemoryState",
+    "EventSkillRegistry",
     "FollowupPolicy",
     "MemoryAuditEvent",
     "MemoryEvidence",
@@ -123,6 +124,8 @@ __all__ = [
     "StructuredMemoryParser",
     "TurnPreprocessor",
     "LLMMemoryProposalExtractor",
+    "LearningEventSkill",
+    "LifeEventSkill",
     "WeightedMemoryWriteEvaluatorV2",
     "WriteDecision",
     "WritePolicyContext",

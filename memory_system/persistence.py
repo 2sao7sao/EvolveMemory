@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from .engine import MemoryStore
 from .models import (
+    Authority,
     EventMemoryState,
     MemoryEvidence,
     MemoryOperation,
@@ -429,6 +430,22 @@ class NormalizedSQLiteMemoryRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def export_user_memory(self, *, user_id: str) -> dict[str, object]:
+        return {
+            "user_id": user_id,
+            "settings": self.get_user_settings(user_id).to_dict(),
+            "memory_records": [
+                record.model_dump(mode="json")
+                for record in self.list_records(user_id=user_id, status=None, limit=10000)
+            ],
+            "event_states": [
+                event.model_dump(mode="json")
+                for event in self.list_event_states(user_id=user_id, limit=10000)
+            ],
+            "review_queue": self.list_review_items(user_id=user_id, limit=10000),
+            "audit_events": self.list_audit_events(user_id=user_id, limit=10000),
+        }
+
     def enqueue_review(
         self,
         operation: MemoryOperation,
@@ -482,7 +499,7 @@ class NormalizedSQLiteMemoryRepository:
                 """,
                 (user_id, status, limit),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._review_row_to_dict(row) for row in rows]
 
     def get_review_item(
         self,
@@ -497,7 +514,7 @@ class NormalizedSQLiteMemoryRepository:
             params.append(user_id)
         with self._connect() as conn:
             row = conn.execute(query, params).fetchone()
-        return dict(row) if row else None
+        return self._review_row_to_dict(row) if row else None
 
     def resolve_review_item(
         self,
@@ -586,6 +603,57 @@ class NormalizedSQLiteMemoryRepository:
             created_at=timestamp,
         )
         return True
+
+    def correct_record(
+        self,
+        memory_id: str,
+        *,
+        user_id: str,
+        value: object,
+        evidence: str,
+        confidence: float = 1.0,
+        corrected_at: datetime | None = None,
+    ) -> MemoryRecord | None:
+        timestamp = corrected_at or datetime.now(timezone.utc)
+        existing = self.get_record(memory_id)
+        if existing is None or existing.user_id != user_id:
+            return None
+        corrected = existing.model_copy(deep=True)
+        corrected.id = uuid4()
+        corrected.value = value
+        corrected.normalized_value = value
+        corrected.confidence = confidence
+        corrected.authority = Authority.USER_EXPLICIT
+        corrected.valid_from = timestamp
+        corrected.observed_at = timestamp
+        corrected.last_confirmed_at = timestamp
+        corrected.source_turn_ids = sorted(set(corrected.source_turn_ids + ["user_correction"]))
+        corrected.source_text_hash = sha256(evidence.encode("utf-8")).hexdigest()
+        corrected.status = MemoryStatus.ACTIVE
+        corrected.version = existing.version + 1
+        corrected.supersedes = existing.id
+        corrected.superseded_by = None
+        corrected.metadata = {
+            **corrected.metadata,
+            "evidence": evidence,
+            "correction": True,
+            "corrected_from": str(existing.id),
+        }
+        existing.status = MemoryStatus.SUPERSEDED
+        existing.superseded_by = corrected.id
+        self.upsert_record(existing)
+        self.upsert_record(corrected)
+        self.add_evidence_for_record(corrected, created_at=timestamp)
+        self.record_lifecycle_audit(
+            user_id=user_id,
+            action="corrected",
+            memory_id=str(corrected.id),
+            before=existing.model_dump(mode="json"),
+            after=corrected.model_dump(mode="json"),
+            reason="user corrected normalized memory",
+            created_at=timestamp,
+        )
+        return corrected
 
     def forget_all(
         self,
@@ -813,6 +881,31 @@ class NormalizedSQLiteMemoryRepository:
                 "metadata": json.loads(row["metadata_json"]),
             }
         )
+
+    def _review_row_to_dict(self, row: sqlite3.Row) -> dict[str, object]:
+        payload = dict(row)
+        candidate = json.loads(str(payload["candidate_json"]))
+        target_memory_id = payload.get("target_memory_id")
+        before = None
+        if target_memory_id:
+            existing = self.get_record(str(target_memory_id))
+            before = existing.model_dump(mode="json") if existing else None
+        payload["candidate"] = candidate
+        payload["before_after_diff"] = self._before_after_diff(before, candidate)
+        return payload
+
+    def _before_after_diff(
+        self,
+        before: dict | None,
+        after: dict,
+    ) -> dict[str, dict[str, object | None]]:
+        diff: dict[str, dict[str, object | None]] = {}
+        for key in ("layer", "key", "value", "confidence", "authority", "sensitivity"):
+            before_value = before.get(key) if before else None
+            after_value = after.get(key)
+            if before_value != after_value:
+                diff[key] = {"before": before_value, "after": after_value}
+        return diff
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
