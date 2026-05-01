@@ -30,7 +30,12 @@ from .models import (
     PromptVisibility,
     Sensitivity,
 )
-from .persistence import DiskSessionRepository, SQLiteSessionRepository, SessionRepository
+from .persistence import (
+    DiskSessionRepository,
+    NormalizedSQLiteMemoryRepository,
+    SQLiteSessionRepository,
+    SessionRepository,
+)
 from .prompting import PromptContextBuilder
 from .registry import MemorySlotRegistry, SlotDefinition
 from .schema import (
@@ -71,6 +76,7 @@ __all__ = [
     "MemoryUseAction",
     "MemoryUseGate",
     "MemoryWriteEvaluator",
+    "NormalizedSQLiteMemoryRepository",
     "ProfileInferencer",
     "PromptContextBuilder",
     "PromptVisibility",

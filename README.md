@@ -178,6 +178,9 @@ compatibility:
   `summarize_only`, and `suppress`.
 - `ContextCompiler` separates direct facts, style policy, event follow-up cues,
   hidden constraints, and clarification prompts.
+- `NormalizedSQLiteMemoryRepository` adds the first normalized Phase 2
+  `memory_records` table, indexes, CRUD, tombstone delete, and legacy
+  `MemoryStore` migration path.
 - `/v2/users/{user_id}/turns/ingest`, `/v2/users/{user_id}/memory/query`, and
   `/v2/users/{user_id}/prompt-context` expose the Phase 2 API shape.
 - `evals/runner.py` adds the first gate evaluation smoke suite.

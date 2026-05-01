@@ -164,6 +164,7 @@ Phase 2 优化规格已纳入仓库：
 - 增加 `MemoryItem -> MemoryRecord` adapter，为后续 normalized storage 做准备。
 - `MemoryUseGate` 扩展到 Phase 2 的 7 个 action：`use_directly`、`style_only`、`follow_up`、`clarify`、`hidden_constraint`、`summarize_only`、`suppress`。
 - `ContextCompiler` 将上下文拆成 direct facts、style policy、event follow-up cues、hidden constraints、clarification prompts。
+- `NormalizedSQLiteMemoryRepository` 增加第一版 Phase 2 normalized `memory_records` 表、索引、CRUD、tombstone delete 和旧 `MemoryStore` 迁移路径。
 - 新增 `/v2/users/{user_id}/turns/ingest`、`/v2/users/{user_id}/memory/query`、`/v2/users/{user_id}/prompt-context`，提供 Phase 2 API 形态。
 - `evals/runner.py` 增加第一版 gate eval smoke suite。
 

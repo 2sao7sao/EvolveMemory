@@ -16,6 +16,7 @@ from memory_system import (
     MemoryRecord,
     MemoryUseAction,
     MemoryUseGate,
+    NormalizedSQLiteMemoryRepository,
     MemorySlotRegistry,
     MemoryStore,
     MemoryType,
@@ -230,6 +231,53 @@ class MemorySystemTest(unittest.TestCase):
             keys = [item["key"] for item in active]
 
             self.assertIn("work_status", keys)
+            self.assertIn("communication_style", keys)
+
+    def test_normalized_sqlite_repository_persists_memory_records(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            item = self.extractor.extract(
+                "回答直接一点。",
+                source="turn_1",
+                timestamp=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+            )[0]
+            record = MemoryRecord.from_memory_item(
+                item,
+                user_id="user-1",
+                session_id="session-1",
+            )
+
+            repo.upsert_record(record)
+            loaded = repo.get_record(str(record.id))
+            active = repo.list_records(user_id="user-1")
+
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded.key, "communication_style")
+            self.assertEqual(active[0].layer, MemoryLayer.PREFERENCE)
+            self.assertTrue(repo.mark_deleted(str(record.id)))
+            self.assertEqual(repo.list_records(user_id="user-1"), [])
+
+    def test_normalized_sqlite_repository_migrates_active_store(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            timestamp = datetime(2026, 4, 16, 9, 0, tzinfo=self.tz)
+            self.store.extend(
+                self.extractor.extract(
+                    "我最近准备面试，回答直接一点。",
+                    source="turn_1",
+                    timestamp=timestamp,
+                )
+            )
+
+            records = repo.migrate_store(
+                store=self.store,
+                user_id="user-1",
+                session_id="session-1",
+            )
+            keys = [record.key for record in repo.list_records(user_id="user-1")]
+
+            self.assertEqual(len(records), 2)
+            self.assertIn("life_event", keys)
             self.assertIn("communication_style", keys)
 
     def test_write_policy_rejects_low_value_memory(self) -> None:
