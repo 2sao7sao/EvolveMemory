@@ -11,9 +11,13 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from memory_system.events import CareerEventSkill
+from memory_system.extraction import MemoryCommand, RuleMemoryProposalExtractor, TurnPreprocessor
+from memory_system.models import MemoryOperation, MemoryOperationType, MemoryRecord
 from memory_system.registry import MemorySlotRegistry
 from memory_system.service import SessionMemoryRuntime
 from memory_system.schema import MemoryType, StateDynamics
+from memory_system.writing import MemoryOperationPlanner, WritePolicyContext
 
 
 APP_TIMEZONE = ZoneInfo("Asia/Shanghai")
@@ -144,6 +148,52 @@ def normalize_timestamp(value: datetime | None) -> datetime:
     return value
 
 
+def operation_to_dict(operation: MemoryOperation) -> dict[str, Any]:
+    return operation.model_dump(mode="json")
+
+
+def record_to_dict(record: MemoryRecord) -> dict[str, Any]:
+    return record.model_dump(mode="json")
+
+
+def existing_v2_records(
+    runtime: SessionMemoryRuntime,
+    *,
+    user_id: str,
+    session_id: str | None,
+    timestamp: datetime,
+) -> list[MemoryRecord]:
+    return [
+        MemoryRecord.from_memory_item(item, user_id=user_id, session_id=session_id)
+        for item in runtime.store.active_memories(now=timestamp)
+    ]
+
+
+def v2_active_memory_delta(operations: list[MemoryOperation]) -> dict[str, int]:
+    return {
+        "created": len(
+            [item for item in operations if item.operation == MemoryOperationType.CREATE]
+        ),
+        "updated": len(
+            [
+                item
+                for item in operations
+                if item.operation
+                in {
+                    MemoryOperationType.MERGE,
+                    MemoryOperationType.UPDATE,
+                    MemoryOperationType.SUPERSEDE,
+                    MemoryOperationType.ADD_EVIDENCE_ONLY,
+                }
+            ]
+        ),
+        "rejected": len(
+            [item for item in operations if item.operation == MemoryOperationType.REJECT]
+        ),
+        "review_required": len([item for item in operations if item.requires_user_review]),
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {
@@ -162,12 +212,29 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
     timestamp = normalize_timestamp(request.timestamp)
     turn_id = f"turn_{uuid4().hex[:12]}"
     runtime = manager.get(v2_session_key(user_id, request.session_id))
+    preprocessed_turn = TurnPreprocessor().preprocess(
+        text=request.text,
+        timestamp=timestamp,
+        role=request.role,
+        turn_id=turn_id,
+    )
     if request.role != "user" or not request.options.extract_memory:
         return {
             "turn_id": turn_id,
+            "preprocessed_turn": {
+                "language": preprocessed_turn.language,
+                "memory_command": (
+                    preprocessed_turn.memory_command.value
+                    if preprocessed_turn.memory_command
+                    else None
+                ),
+                "time_expressions": preprocessed_turn.time_expressions,
+                "text_hash": preprocessed_turn.text_hash,
+            },
             "candidate_memories": [],
             "write_decisions": [],
             "operations": [],
+            "event_states": [],
             "active_memory_delta": {
                 "created": 0,
                 "updated": 0,
@@ -175,13 +242,61 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
                 "review_required": 0,
             },
         }
-    result = runtime.ingest_turn(request.text, source=turn_id, timestamp=timestamp)
+    candidates = RuleMemoryProposalExtractor().propose(
+        preprocessed_turn,
+        user_id=user_id,
+        session_id=request.session_id,
+    )
+    operations = MemoryOperationPlanner().plan(
+        candidates,
+        existing_v2_records(
+            runtime,
+            user_id=user_id,
+            session_id=request.session_id,
+            timestamp=timestamp,
+        ),
+        WritePolicyContext(
+            user_command=(
+                preprocessed_turn.memory_command.value
+                if preprocessed_turn.memory_command
+                else None
+            )
+        ),
+    )
+    event_states = CareerEventSkill().detect(candidates)
+    can_legacy_autowrite = request.options.auto_write and preprocessed_turn.memory_command not in {
+        MemoryCommand.DO_NOT_REMEMBER,
+        MemoryCommand.FORGET,
+    }
+    result = (
+        runtime.ingest_turn(request.text, source=turn_id, timestamp=timestamp)
+        if can_legacy_autowrite
+        else {
+            "accepted_memories": [],
+            "accepted_inferred_memories": [],
+            "write_decisions": [],
+        }
+    )
     return {
         "turn_id": turn_id,
-        "candidate_memories": result["candidates"] if request.options.return_candidates else [],
-        "write_decisions": result["write_decisions"],
-        "operations": [],
-        "active_memory_delta": {
+        "preprocessed_turn": {
+            "language": preprocessed_turn.language,
+            "memory_command": (
+                preprocessed_turn.memory_command.value if preprocessed_turn.memory_command else None
+            ),
+            "time_expressions": preprocessed_turn.time_expressions,
+            "text_hash": preprocessed_turn.text_hash,
+        },
+        "candidate_memories": (
+            [record_to_dict(candidate) for candidate in candidates]
+            if request.options.return_candidates
+            else []
+        ),
+        "write_decisions": [operation_to_dict(operation) for operation in operations],
+        "operations": [operation_to_dict(operation) for operation in operations],
+        "event_states": [event.model_dump(mode="json") for event in event_states],
+        "active_memory_delta": v2_active_memory_delta(operations),
+        "legacy_active_memory_delta": {
             "created": len(result["accepted_memories"]) + len(result["accepted_inferred_memories"]),
             "updated": 0,
             "rejected": len(

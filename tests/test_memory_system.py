@@ -11,7 +11,10 @@ from fastapi.testclient import TestClient
 from memory_system import (
     DialogueMemoryExtractor,
     DiskSessionRepository,
+    CareerEventSkill,
     MemoryOperationPlanner,
+    MemoryCommand,
+    MemoryCommandDetector,
     MemoryItem,
     MemoryLayer,
     MemoryRecord,
@@ -26,6 +29,8 @@ from memory_system import (
     PromptContextBuilder,
     QueryMemoryRetriever,
     ResponsePolicyEngine,
+    RuleMemoryProposalExtractor,
+    TurnPreprocessor,
     SessionMemoryRuntime,
     SQLiteSessionRepository,
     StateDynamics,
@@ -254,6 +259,73 @@ class MemorySystemTest(unittest.TestCase):
         self.assertEqual(operations[0].operation.value, "create")
         self.assertEqual(operations[1].operation.value, "add_evidence_only")
         self.assertEqual(operations[1].target_memory_id, first.id)
+
+    def test_turn_preprocessor_detects_memory_commands(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        turn = TurnPreprocessor().preprocess(
+            text="记住，我喜欢你先给结论。",
+            timestamp=timestamp,
+        )
+        do_not_remember = MemoryCommandDetector().detect("别记我的感情状态。")
+
+        self.assertEqual(turn.language, "zh-CN")
+        self.assertEqual(turn.memory_command, MemoryCommand.REMEMBER)
+        self.assertIn("turn_", turn.turn_id)
+        self.assertEqual(do_not_remember, MemoryCommand.DO_NOT_REMEMBER)
+
+    def test_rule_memory_proposal_extractor_respects_do_not_remember(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        turn = TurnPreprocessor().preprocess(
+            text="别记，我现在单身。",
+            timestamp=timestamp,
+        )
+
+        proposals = RuleMemoryProposalExtractor().propose(turn, user_id="user-1")
+
+        self.assertEqual(proposals, [])
+
+    def test_rule_memory_proposal_extractor_outputs_phase2_records(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        turn = TurnPreprocessor().preprocess(
+            text="我最近准备面试，有点焦虑。回答直接一点。",
+            timestamp=timestamp,
+            turn_id="turn_1",
+        )
+
+        proposals = RuleMemoryProposalExtractor().propose(
+            turn,
+            user_id="user-1",
+            session_id="session-1",
+        )
+        by_key = {proposal.key: proposal for proposal in proposals}
+
+        self.assertEqual(by_key["life_event"].layer, MemoryLayer.EPISODIC_EVENT)
+        self.assertEqual(by_key["current_emotional_state"].sensitivity.value, "sensitive")
+        self.assertEqual(by_key["communication_style"].metadata["language"], "zh-CN")
+        self.assertEqual(by_key["communication_style"].source_text_hash, turn.text_hash)
+
+    def test_career_event_skill_detects_and_updates_interview_event(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        turn = TurnPreprocessor().preprocess(
+            text="我最近准备面试。",
+            timestamp=timestamp,
+            turn_id="turn_1",
+        )
+        proposals = RuleMemoryProposalExtractor().propose(turn, user_id="user-1")
+        skill = CareerEventSkill()
+
+        events = skill.detect(proposals)
+        should_follow_up = skill.should_follow_up(
+            events[0],
+            query="面试怎么准备？",
+            now=datetime(2026, 5, 2, 9, 0, tzinfo=self.tz),
+        )
+        updated = skill.update_state(events[0], proposals[0])
+
+        self.assertEqual(events[0].event_type, "career.interview_preparation")
+        self.assertEqual(events[0].stage, "preparing")
+        self.assertTrue(should_follow_up)
+        self.assertEqual(updated.status, "progressing")
 
     def test_prompt_builder_outputs_assembled_prompt(self) -> None:
         turns = [
@@ -565,7 +637,11 @@ class MemoryApiTest(unittest.TestCase):
             },
         )
         self.assertEqual(ingest.status_code, 200)
-        self.assertTrue(ingest.json()["candidate_memories"])
+        ingest_payload = ingest.json()
+        self.assertEqual(ingest_payload["preprocessed_turn"]["language"], "zh-CN")
+        self.assertTrue(ingest_payload["candidate_memories"])
+        self.assertTrue(ingest_payload["operations"])
+        self.assertTrue(ingest_payload["event_states"])
 
         query = self.client.post(
             "/v2/users/test-user/memory/query",
@@ -581,6 +657,36 @@ class MemoryApiTest(unittest.TestCase):
         self.assertIn("compiled_context", payload)
         self.assertTrue(payload["gate"]["selected"])
         self.assertTrue(payload["compiled_context"]["event_followups"])
+
+    def test_v2_ingest_honors_do_not_remember_command(self) -> None:
+        ingest = self.client.post(
+            "/v2/users/test-user/turns/ingest",
+            json={
+                "session_id": "phase2-private",
+                "role": "user",
+                "text": "别记，我现在单身。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(ingest.status_code, 200)
+        ingest_payload = ingest.json()
+        self.assertEqual(
+            ingest_payload["preprocessed_turn"]["memory_command"],
+            "do_not_remember",
+        )
+        self.assertEqual(ingest_payload["candidate_memories"], [])
+        self.assertEqual(ingest_payload["operations"], [])
+
+        query = self.client.post(
+            "/v2/users/test-user/memory/query",
+            json={
+                "session_id": "phase2-private",
+                "query": "我的感情状态是什么？",
+            },
+        )
+
+        self.assertEqual(query.status_code, 200)
+        self.assertEqual(query.json()["candidates"], [])
 
 
 if __name__ == "__main__":

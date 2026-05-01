@@ -166,6 +166,8 @@ Phase 2 优化规格已纳入仓库：
 - `ContextCompiler` 将上下文拆成 direct facts、style policy、event follow-up cues、hidden constraints、clarification prompts。
 - `NormalizedSQLiteMemoryRepository` 增加第一版 Phase 2 normalized `memory_records` 表、索引、CRUD、tombstone delete 和旧 `MemoryStore` 迁移路径。
 - `WeightedMemoryWriteEvaluatorV2`、`ContradictionDetector`、`MemoryOperationPlanner` 增加第一版确定性写入治理：加权评分、硬规则、重复处理、review routing 和 supersession planning。
+- `TurnPreprocessor`、`MemoryCommandDetector`、`SensitivityClassifier`、`RuleMemoryProposalExtractor` 增加第一版 Phase 2 proposal extraction pipeline，同时保留无网络依赖的 LLM extractor 边界。
+- `CareerEventSkill` 增加第一版面试 / 求职事件状态 skill，用于进展识别和 follow-up 判断。
 - 新增 `/v2/users/{user_id}/turns/ingest`、`/v2/users/{user_id}/memory/query`、`/v2/users/{user_id}/prompt-context`，提供 Phase 2 API 形态。
 - `evals/runner.py` 增加第一版 gate eval smoke suite。
 

@@ -185,6 +185,11 @@ compatibility:
   `MemoryOperationPlanner` add the first deterministic write-governance layer:
   weighted scoring, hard rules, duplicate handling, review routing, and
   supersession planning.
+- `TurnPreprocessor`, `MemoryCommandDetector`, `SensitivityClassifier`, and
+  `RuleMemoryProposalExtractor` add the first Phase 2 proposal-extraction
+  pipeline while keeping the LLM extractor boundary dependency-free.
+- `CareerEventSkill` adds the first event-state skill for interview/job-search
+  progress detection and follow-up eligibility.
 - `/v2/users/{user_id}/turns/ingest`, `/v2/users/{user_id}/memory/query`, and
   `/v2/users/{user_id}/prompt-context` expose the Phase 2 API shape.
 - `evals/runner.py` adds the first gate evaluation smoke suite.

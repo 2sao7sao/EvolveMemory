@@ -9,6 +9,16 @@ from .engine import (
     ResponsePolicyEngine,
 )
 from .context import CompiledMemoryContext, ContextCompiler
+from .events import CareerEventSkill
+from .extraction import (
+    LLMMemoryProposalExtractor,
+    MemoryCommand,
+    MemoryCommandDetector,
+    PreprocessedTurn,
+    RuleMemoryProposalExtractor,
+    SensitivityClassifier,
+    TurnPreprocessor,
+)
 from .gating import (
     MemoryGateDecision,
     MemoryGateResult,
@@ -65,6 +75,7 @@ __all__ = [
     "ContextCompiler",
     "Contradiction",
     "ContradictionDetector",
+    "CareerEventSkill",
     "DialogueMemoryExtractor",
     "DiskSessionRepository",
     "EventMemoryState",
@@ -81,6 +92,8 @@ __all__ = [
     "MemoryOperationPlanner",
     "MemoryRecord",
     "MemoryStatus",
+    "MemoryCommand",
+    "MemoryCommandDetector",
     "MemoryStore",
     "MemoryType",
     "MemoryUseAction",
@@ -88,11 +101,14 @@ __all__ = [
     "MemoryWriteEvaluator",
     "NormalizedSQLiteMemoryRepository",
     "ProfileInferencer",
+    "PreprocessedTurn",
     "PromptContextBuilder",
     "PromptVisibility",
     "QueryMemoryRetriever",
     "ResponsePolicy",
     "ResponsePolicyEngine",
+    "RuleMemoryProposalExtractor",
+    "SensitivityClassifier",
     "SessionMemoryRuntime",
     "SessionRepository",
     "SQLiteSessionRepository",
@@ -100,6 +116,8 @@ __all__ = [
     "StateDynamics",
     "Sensitivity",
     "StructuredMemoryParser",
+    "TurnPreprocessor",
+    "LLMMemoryProposalExtractor",
     "WeightedMemoryWriteEvaluatorV2",
     "WriteDecision",
     "WritePolicyContext",
