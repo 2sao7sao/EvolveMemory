@@ -1,5 +1,10 @@
 <img src="assets/adaptive-memory-engine-hero.png" alt="EvolveMemory banner" width="100%" />
 
+<p align="right">
+  <a href="./README.md"><img src="https://img.shields.io/badge/English-README-blue" alt="English README"></a>
+  <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/中文-README-red" alt="中文 README"></a>
+</p>
+
 # EvolveMemory
 
 [![Status](https://img.shields.io/badge/status-Prototype%20%2F%20WIP-yellow)](./README.md)
