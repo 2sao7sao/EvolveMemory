@@ -28,6 +28,8 @@ from memory_system import (
     MemoryType,
     MemoryWriteEvaluator,
     ProfileInferencer,
+    ProfileAccumulator,
+    ProfileEvidenceExtractor,
     PromptContextBuilder,
     QueryMemoryRetriever,
     QueryIntentClassifier,
@@ -576,6 +578,41 @@ class MemorySystemTest(unittest.TestCase):
         self.assertIn("event_state", plan.retrieval_modes)
         self.assertIn(MemoryLayer.EPISODIC_EVENT, plan.include_layers)
 
+    def test_profile_evidence_accumulates_before_inferred_profile(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        first = TurnPreprocessor().preprocess(
+            text="回答直接一点。",
+            timestamp=timestamp,
+            turn_id="turn_1",
+        )
+        second = TurnPreprocessor().preprocess(
+            text="直接给建议。",
+            timestamp=timestamp,
+            turn_id="turn_2",
+        )
+        records = (
+            RuleMemoryProposalExtractor().propose(first, user_id="user-1")
+            + RuleMemoryProposalExtractor().propose(second, user_id="user-1")
+        )
+        evidence = ProfileEvidenceExtractor().extract(records)
+        hypotheses = ProfileAccumulator().accumulate(evidence)
+
+        self.assertTrue(evidence)
+        self.assertEqual(hypotheses, [])
+
+        third = TurnPreprocessor().preprocess(
+            text="再提醒一下，回答直接一点。",
+            timestamp=timestamp,
+            turn_id="turn_3",
+        )
+        more_records = RuleMemoryProposalExtractor().propose(third, user_id="user-1")
+        accumulated = ProfileAccumulator().accumulate(
+            evidence + ProfileEvidenceExtractor().extract(more_records)
+        )
+
+        self.assertTrue(accumulated)
+        self.assertEqual(accumulated[0].dimension, "directness_preference_level")
+
     def test_write_policy_rejects_low_value_memory(self) -> None:
         memory = MemoryItem(
             memory_type=MemoryType.STATE,
@@ -922,6 +959,49 @@ class MemoryApiTest(unittest.TestCase):
         self.assertEqual(export.status_code, 200)
         self.assertTrue(export.json()["memory_records"])
         self.assertTrue(export.json()["audit_events"])
+
+    def test_v2_profile_evidence_accumulation_api(self) -> None:
+        user_id = f"profile-user-{uuid4().hex}"
+        session_id = f"profile-session-{uuid4().hex}"
+        first = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "回答直接一点。",
+                "options": {"return_candidates": True},
+            },
+        )
+        second = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "再提醒一下，回答直接一点。",
+                "options": {"return_candidates": True},
+            },
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(second.json()["profile_evidence"])
+        self.assertTrue(second.json()["profile_candidates"])
+        self.assertEqual(
+            second.json()["profile_operations"][0]["operation"],
+            "ask_user_confirmation",
+        )
+
+        evidence = self.client.get(f"/v2/users/{user_id}/memory/profile-evidence")
+        self.assertEqual(evidence.status_code, 200)
+        self.assertGreaterEqual(len(evidence.json()["profile_evidence"]), 2)
+
+        queue = self.client.get(f"/v2/users/{user_id}/memory/review-queue")
+        self.assertTrue(
+            any(
+                "directness_preference_level" in item["candidate_json"]
+                for item in queue.json()["review_items"]
+            )
+        )
 
     def test_v2_review_queue_contains_before_after_diff(self) -> None:
         user_id = f"diff-user-{uuid4().hex}"

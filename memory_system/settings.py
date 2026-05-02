@@ -36,6 +36,8 @@ class UserMemorySettings:
         return self.memory_enabled and key not in self.disabled_keys
 
     def allows_layer(self, layer: MemoryLayer) -> bool:
+        if layer == MemoryLayer.INFERRED_PROFILE and not self.allow_inferred_profile:
+            return False
         return self.memory_enabled and layer not in self.disabled_layers
 
     def to_dict(self) -> dict[str, Any]:

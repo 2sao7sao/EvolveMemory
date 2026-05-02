@@ -131,10 +131,12 @@ be a general mechanism. Next skills should be:
 - `project_event_skill`
 - `relationship_event_skill` with stricter privacy gates
 
-### P2: Profile Inference Is Too Shallow
+### P2: Profile Inference Needs Richer Psychology And Explanation
 
-Current profile dimensions are useful but narrow. The next version should accumulate
-evidence and expose user-readable explanations:
+The system now has the first profile evidence ledger and accumulator. Repeated
+signals can produce reviewable inferred-profile candidates. The remaining gap is
+depth: dimensions are useful but narrow, and explanations are still structural
+rather than psychologically rich.
 
 ```text
 profile dimension

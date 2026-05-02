@@ -190,6 +190,9 @@ compatibility:
 - `TurnPreprocessor`, `MemoryCommandDetector`, `SensitivityClassifier`, and
   `RuleMemoryProposalExtractor` add the first Phase 2 proposal-extraction
   pipeline while keeping the LLM extractor boundary dependency-free.
+- `ProfileEvidenceExtractor` and `ProfileAccumulator` add the first long-term
+  profile evidence ledger: repeated behavioral signals become reviewable
+  `inferred_profile` candidates instead of one-turn psychological conclusions.
 - `CareerEventSkill`, `LearningEventSkill`, and `LifeEventSkill` add the first
   event-state skills for career, exam-prep, relationship-change, relocation,
   and onboarding follow-up.
@@ -209,6 +212,8 @@ compatibility:
 - `/v2/users/{user_id}/memory/audit/export` exports normalized records,
   settings, review items, event states, and audit events for inspection or
   portability.
+- `/v2/users/{user_id}/memory/profile-evidence` exposes the supporting evidence
+  behind inferred profile hypotheses.
 - `QueryIntentClassifier` and `RetrievalPlanner` add the first deterministic
   intent-aware retrieval plan before the gate.
 - `evals/runner.py` adds the first gate evaluation smoke suite.

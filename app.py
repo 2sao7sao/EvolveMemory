@@ -20,6 +20,7 @@ from memory_system.models import (
     MemoryRecord,
     Sensitivity,
 )
+from memory_system.profiles import ProfileAccumulator, ProfileEvidenceExtractor
 from memory_system.registry import MemorySlotRegistry
 from memory_system.retrieval import RetrievalPlan, RetrievalPlanner
 from memory_system.schema import MemoryItem, MemoryType, StateDynamics
@@ -438,6 +439,45 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
         for event in event_states
         if event.memory_id in persisted_active_ids and settings.allow_event_followup
     ]
+    profile_source_records = [
+        operation.candidate
+        for operation in operations
+        if operation.operation
+        in {
+            MemoryOperationType.CREATE,
+            MemoryOperationType.SUPERSEDE,
+            MemoryOperationType.MERGE,
+            MemoryOperationType.UPDATE,
+            MemoryOperationType.ADD_EVIDENCE_ONLY,
+        }
+        and not operation.requires_user_review
+    ]
+    profile_evidence = (
+        ProfileEvidenceExtractor().extract(profile_source_records)
+        if settings.allow_inferred_profile
+        else []
+    )
+    normalized_repository.add_profile_evidence_batch(profile_evidence)
+    profile_candidates = [
+        hypothesis.to_record(
+            user_id=user_id,
+            session_id=request.session_id,
+            observed_at=timestamp,
+        )
+        for hypothesis in ProfileAccumulator().accumulate(
+            normalized_repository.list_profile_evidence(user_id=user_id)
+        )
+    ]
+    profile_operations = MemoryOperationPlanner().plan(
+        profile_candidates,
+        existing_v2_records(user_id=user_id, session_id=request.session_id),
+        WritePolicyContext(settings=settings),
+    )
+    persisted_profile_records = (
+        normalized_repository.apply_operations(profile_operations, created_at=timestamp)
+        if can_v2_autowrite
+        else []
+    )
     can_legacy_autowrite = (
         request.options.auto_write
         and preprocessed_turn.memory_command
@@ -476,6 +516,14 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
         "event_states": [event.model_dump(mode="json") for event in event_states],
         "persisted_event_states": [
             event.model_dump(mode="json") for event in persisted_event_states
+        ],
+        "profile_evidence": [item.to_dict() for item in profile_evidence],
+        "profile_candidates": [record_to_dict(record) for record in profile_candidates],
+        "profile_operations": [
+            operation_to_dict(operation) for operation in profile_operations
+        ],
+        "persisted_profile_records": [
+            record_to_dict(record) for record in persisted_profile_records
         ],
         "persisted_records": [record_to_dict(record) for record in persisted_records],
         "active_memory_delta": v2_active_memory_delta(operations),
@@ -692,6 +740,24 @@ def v2_memory_events(
             for event in build_normalized_repository().list_event_states(
                 user_id=user_id,
                 status=status,
+                limit=limit,
+            )
+        ]
+    }
+
+
+@app.get("/v2/users/{user_id}/memory/profile-evidence")
+def v2_profile_evidence(
+    user_id: str,
+    dimension: str | None = None,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    return {
+        "profile_evidence": [
+            item.to_dict()
+            for item in build_normalized_repository().list_profile_evidence(
+                user_id=user_id,
+                dimension=dimension,
                 limit=limit,
             )
         ]

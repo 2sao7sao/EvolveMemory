@@ -47,6 +47,12 @@ from .persistence import (
     SessionRepository,
 )
 from .prompting import PromptContextBuilder
+from .profiles import (
+    ProfileAccumulator,
+    ProfileEvidence,
+    ProfileEvidenceExtractor,
+    ProfileHypothesis,
+)
 from .registry import MemorySlotRegistry, SlotDefinition
 from .retrieval import QueryIntent, QueryIntentClassifier, RetrievalPlan, RetrievalPlanner
 from .schema import (
@@ -103,6 +109,10 @@ __all__ = [
     "MemoryWriteEvaluator",
     "NormalizedSQLiteMemoryRepository",
     "ProfileInferencer",
+    "ProfileAccumulator",
+    "ProfileEvidence",
+    "ProfileEvidenceExtractor",
+    "ProfileHypothesis",
     "PreprocessedTurn",
     "PromptContextBuilder",
     "PromptVisibility",

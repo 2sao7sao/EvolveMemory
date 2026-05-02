@@ -19,6 +19,7 @@ from .models import (
     MemoryRecord,
     MemoryStatus,
 )
+from .profiles import ProfileEvidence
 from .schema import MemoryAuditEvent, MemoryItem
 from .settings import UserMemorySettings
 
@@ -434,6 +435,9 @@ class NormalizedSQLiteMemoryRepository:
         return {
             "user_id": user_id,
             "settings": self.get_user_settings(user_id).to_dict(),
+            "profile_evidence": [
+                item.to_dict() for item in self.list_profile_evidence(user_id=user_id)
+            ],
             "memory_records": [
                 record.model_dump(mode="json")
                 for record in self.list_records(user_id=user_id, status=None, limit=10000)
@@ -556,6 +560,74 @@ class NormalizedSQLiteMemoryRepository:
             audit_metadata={"policy_version": "review-v2.0"},
         )
         return self.apply_operation(operation, created_at=timestamp)
+
+    def add_profile_evidence(self, evidence: ProfileEvidence) -> ProfileEvidence:
+        payload = evidence.to_dict()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO profile_evidence (
+                    id, user_id, session_id, dimension, value, confidence, weight,
+                    polarity, source_memory_id, source_key, quote, observed_at,
+                    metadata_json
+                )
+                VALUES (
+                    :id, :user_id, :session_id, :dimension, :value, :confidence, :weight,
+                    :polarity, :source_memory_id, :source_key, :quote, :observed_at,
+                    :metadata_json
+                )
+                """,
+                {
+                    **payload,
+                    "metadata_json": json.dumps(payload["metadata"], ensure_ascii=False),
+                },
+            )
+        return evidence
+
+    def add_profile_evidence_batch(
+        self,
+        evidence: list[ProfileEvidence],
+    ) -> list[ProfileEvidence]:
+        for item in evidence:
+            self.add_profile_evidence(item)
+        return evidence
+
+    def list_profile_evidence(
+        self,
+        *,
+        user_id: str,
+        dimension: str | None = None,
+        limit: int = 1000,
+    ) -> list[ProfileEvidence]:
+        query = "SELECT * FROM profile_evidence WHERE user_id = ?"
+        params: list[object] = [user_id]
+        if dimension is not None:
+            query += " AND dimension = ?"
+            params.append(dimension)
+        query += " ORDER BY observed_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [
+            ProfileEvidence.from_dict(
+                {
+                    "id": row["id"],
+                    "user_id": row["user_id"],
+                    "session_id": row["session_id"],
+                    "dimension": row["dimension"],
+                    "value": row["value"],
+                    "confidence": row["confidence"],
+                    "weight": row["weight"],
+                    "polarity": row["polarity"],
+                    "source_memory_id": row["source_memory_id"],
+                    "source_key": row["source_key"],
+                    "quote": row["quote"],
+                    "observed_at": row["observed_at"],
+                    "metadata": json.loads(row["metadata_json"]),
+                }
+            )
+            for row in rows
+        ]
 
     def mark_deleted(self, memory_id: str, *, updated_at: datetime | None = None) -> bool:
         timestamp = (updated_at or datetime.now(timezone.utc)).isoformat()
@@ -1049,5 +1121,31 @@ class NormalizedSQLiteMemoryRepository:
                 """
                 CREATE INDEX IF NOT EXISTS idx_event_state_user_status
                 ON event_memory_states(user_id, status, updated_at)
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS profile_evidence (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    session_id TEXT,
+                    dimension TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    weight REAL NOT NULL,
+                    polarity TEXT NOT NULL,
+                    source_memory_id TEXT NOT NULL,
+                    source_key TEXT NOT NULL,
+                    quote TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    UNIQUE(user_id, dimension, value, source_memory_id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_profile_evidence_user_dimension
+                ON profile_evidence(user_id, dimension, observed_at)
                 """
             )
