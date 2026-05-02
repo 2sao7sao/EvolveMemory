@@ -11,9 +11,22 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from memory_system.events import EventSkillRegistry
+from memory_system.extraction import MemoryCommand, RuleMemoryProposalExtractor, TurnPreprocessor
+from memory_system.models import (
+    MemoryLayer,
+    MemoryOperation,
+    MemoryOperationType,
+    MemoryRecord,
+    Sensitivity,
+)
+from memory_system.profiles import ProfileAccumulator, ProfileEvidenceExtractor
 from memory_system.registry import MemorySlotRegistry
+from memory_system.retrieval import RetrievalPlan, RetrievalPlanner
+from memory_system.schema import MemoryItem, MemoryType, StateDynamics
 from memory_system.service import SessionMemoryRuntime
-from memory_system.schema import MemoryType, StateDynamics
+from memory_system.settings import UserMemorySettings
+from memory_system.writing import MemoryOperationPlanner, WritePolicyContext
 
 
 APP_TIMEZONE = ZoneInfo("Asia/Shanghai")
@@ -67,6 +80,41 @@ class V2MemoryQueryRequest(BaseModel):
     query: str
     timestamp: datetime | None = None
     options: V2QueryOptions = Field(default_factory=V2QueryOptions)
+
+
+class V2ResolveReviewRequest(BaseModel):
+    approve: bool
+    timestamp: datetime | None = None
+
+
+class V2MemorySettingsRequest(BaseModel):
+    memory_enabled: bool | None = None
+    allow_inferred_profile: bool | None = None
+    allow_sensitive_memory: bool | None = None
+    allow_event_followup: bool | None = None
+    default_retention_days: int | None = Field(None, ge=1)
+    disabled_keys: list[str] | None = None
+    disabled_layers: list[MemoryLayer] | None = None
+    review_required_for_sensitivity: list[Sensitivity] | None = None
+    review_required_for_layers: list[MemoryLayer] | None = None
+
+
+class V2ForgetAllRequest(BaseModel):
+    session_id: str | None = None
+    reason: str = "user requested forget-all"
+    timestamp: datetime | None = None
+
+
+class V2DeleteMemoryRequest(BaseModel):
+    reason: str = "user requested delete"
+    timestamp: datetime | None = None
+
+
+class V2CorrectMemoryRequest(BaseModel):
+    value: Any
+    evidence: str
+    confidence: float = Field(1.0, ge=0.0, le=1.0)
+    timestamp: datetime | None = None
 
 
 class CorrectMemoryRequest(BaseModel):
@@ -136,12 +184,171 @@ def build_repository() -> "SessionRepository":
     raise ValueError(f"Unsupported AME_STORAGE_BACKEND={STORAGE_BACKEND!r}")
 
 
+def build_normalized_repository() -> "NormalizedSQLiteMemoryRepository":
+    from memory_system.persistence import NormalizedSQLiteMemoryRepository
+
+    return NormalizedSQLiteMemoryRepository(SQLITE_DB_PATH)
+
+
 def normalize_timestamp(value: datetime | None) -> datetime:
     if value is None:
         return datetime.now(APP_TIMEZONE)
     if value.tzinfo is None:
         return value.replace(tzinfo=APP_TIMEZONE)
     return value
+
+
+def operation_to_dict(operation: MemoryOperation) -> dict[str, Any]:
+    return operation.model_dump(mode="json")
+
+
+def record_to_dict(record: MemoryRecord) -> dict[str, Any]:
+    return record.model_dump(mode="json")
+
+
+def settings_from_request(
+    request: V2MemorySettingsRequest,
+    existing: UserMemorySettings,
+) -> UserMemorySettings:
+    payload = existing.to_dict()
+    updates = request.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        if value is None:
+            continue
+        if key in {"disabled_layers", "review_required_for_layers"}:
+            payload[key] = [item.value for item in value]
+        elif key == "review_required_for_sensitivity":
+            payload[key] = [item.value for item in value]
+        else:
+            payload[key] = value
+    return UserMemorySettings.from_dict(payload)
+
+
+def existing_v2_records(
+    *,
+    user_id: str,
+    session_id: str | None,
+) -> list[MemoryRecord]:
+    return build_normalized_repository().list_records(
+        user_id=user_id,
+        session_id=session_id,
+        limit=200,
+    )
+
+
+def record_to_memory_item(record: MemoryRecord) -> MemoryItem:
+    memory_type_by_layer = {
+        "episodic_event": MemoryType.EVENT,
+        "inferred_profile": MemoryType.PROFILE,
+        "preference": MemoryType.PREFERENCE,
+    }
+    dynamics_value = record.metadata.get("dynamics", StateDynamics.NOT_APPLICABLE.value)
+    try:
+        dynamics = StateDynamics(dynamics_value)
+    except ValueError:
+        dynamics = StateDynamics.NOT_APPLICABLE
+    return MemoryItem(
+        memory_type=memory_type_by_layer.get(record.layer.value, MemoryType.STATE),
+        key=record.key,
+        value=record.value,
+        confidence=record.confidence,
+        source=record.source_turn_ids[0] if record.source_turn_ids else str(record.id),
+        evidence=str(record.metadata.get("evidence", "")),
+        valid_from=record.valid_from,
+        valid_to=record.valid_to,
+        confirmed_by_user=record.authority.value == "user_explicit",
+        exclusive_group=record.exclusive_group,
+        coexistence_rule=record.coexistence_rule,
+        dynamics=dynamics,
+        tags=list(record.tags),
+        last_updated=record.observed_at,
+    )
+
+
+def query_v2_records(
+    runtime: SessionMemoryRuntime,
+    *,
+    query_text: str,
+    timestamp: datetime,
+    limit: int,
+    records: list[MemoryRecord],
+    plan: RetrievalPlan,
+) -> dict[str, Any]:
+    active = [
+        item
+        for item in (record_to_memory_item(record) for record in records)
+        if item.is_active(timestamp)
+    ]
+    candidates = runtime.retriever.retrieve(query_text, active, limit=plan.candidate_limit)
+    gate_result = runtime.use_gate.select(query_text, candidates, now=timestamp, limit=limit)
+    relevant = gate_result.selected
+    policy = runtime.policy_engine.build_from_memories(relevant)
+    compiled_context = runtime.context_compiler.compile(
+        query=query_text,
+        gate_result=gate_result,
+        response_policy=policy,
+    )
+    return {
+        "query": query_text,
+        "relevant_memories": [item.to_dict() for item in relevant],
+        "memory_gate": gate_result.to_dict(),
+        "compiled_context": compiled_context.to_dict(),
+        "response_policy": policy.to_dict(),
+    }
+
+
+def prompt_context_from_v2_records(
+    runtime: SessionMemoryRuntime,
+    *,
+    query_text: str,
+    timestamp: datetime,
+    limit: int,
+    records: list[MemoryRecord],
+) -> dict[str, Any]:
+    query_result = query_v2_records(
+        runtime,
+        query_text=query_text,
+        timestamp=timestamp,
+        limit=limit,
+        records=records,
+        plan=RetrievalPlanner().plan(query_text, max_prompt_memories=limit),
+    )
+    memories = [
+        MemoryItem.from_dict(item)
+        for item in query_result["relevant_memories"]
+    ]
+    return runtime.prompt_builder.build(
+        query_text,
+        memories,
+        runtime.policy_engine.build_from_memories(memories),
+        memory_gate=query_result["memory_gate"],
+        compiled_context=query_result["compiled_context"],
+    )
+
+
+def v2_active_memory_delta(operations: list[MemoryOperation]) -> dict[str, int]:
+    return {
+        "created": len(
+            [item for item in operations if item.operation == MemoryOperationType.CREATE]
+        ),
+        "updated": len(
+            [
+                item
+                for item in operations
+                if item.operation
+                in {
+                    MemoryOperationType.MERGE,
+                    MemoryOperationType.UPDATE,
+                    MemoryOperationType.SUPERSEDE,
+                    MemoryOperationType.ADD_EVIDENCE_ONLY,
+                }
+            ]
+        ),
+        "rejected": len(
+            [item for item in operations if item.operation == MemoryOperationType.REJECT]
+        ),
+        "review_required": len([item for item in operations if item.requires_user_review]),
+    }
 
 
 @app.get("/health")
@@ -162,12 +369,31 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
     timestamp = normalize_timestamp(request.timestamp)
     turn_id = f"turn_{uuid4().hex[:12]}"
     runtime = manager.get(v2_session_key(user_id, request.session_id))
+    normalized_repository = build_normalized_repository()
+    settings = normalized_repository.get_user_settings(user_id)
+    preprocessed_turn = TurnPreprocessor().preprocess(
+        text=request.text,
+        timestamp=timestamp,
+        role=request.role,
+        turn_id=turn_id,
+    )
     if request.role != "user" or not request.options.extract_memory:
         return {
             "turn_id": turn_id,
+            "preprocessed_turn": {
+                "language": preprocessed_turn.language,
+                "memory_command": (
+                    preprocessed_turn.memory_command.value
+                    if preprocessed_turn.memory_command
+                    else None
+                ),
+                "time_expressions": preprocessed_turn.time_expressions,
+                "text_hash": preprocessed_turn.text_hash,
+            },
             "candidate_memories": [],
             "write_decisions": [],
             "operations": [],
+            "event_states": [],
             "active_memory_delta": {
                 "created": 0,
                 "updated": 0,
@@ -175,13 +401,133 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
                 "review_required": 0,
             },
         }
-    result = runtime.ingest_turn(request.text, source=turn_id, timestamp=timestamp)
+    candidates = RuleMemoryProposalExtractor().propose(
+        preprocessed_turn,
+        user_id=user_id,
+        session_id=request.session_id,
+    )
+    operations = MemoryOperationPlanner().plan(
+        candidates,
+        existing_v2_records(
+            user_id=user_id,
+            session_id=request.session_id,
+        ),
+        WritePolicyContext(
+            user_command=(
+                preprocessed_turn.memory_command.value
+                if preprocessed_turn.memory_command
+                else None
+            ),
+            settings=settings,
+        ),
+    )
+    event_states = EventSkillRegistry().detect(candidates)
+    can_v2_autowrite = request.options.auto_write and preprocessed_turn.memory_command not in {
+        MemoryCommand.DO_NOT_REMEMBER,
+        MemoryCommand.FORGET,
+    }
+    persisted_records = (
+        normalized_repository.apply_operations(operations, created_at=timestamp)
+        if can_v2_autowrite
+        else []
+    )
+    persisted_active_ids = {
+        record.id for record in persisted_records if record.status.value == "active"
+    }
+    persisted_event_states = [
+        normalized_repository.upsert_event_state(event, user_id=user_id)
+        for event in event_states
+        if event.memory_id in persisted_active_ids and settings.allow_event_followup
+    ]
+    profile_source_records = [
+        operation.candidate
+        for operation in operations
+        if operation.operation
+        in {
+            MemoryOperationType.CREATE,
+            MemoryOperationType.SUPERSEDE,
+            MemoryOperationType.MERGE,
+            MemoryOperationType.UPDATE,
+            MemoryOperationType.ADD_EVIDENCE_ONLY,
+        }
+        and not operation.requires_user_review
+    ]
+    profile_evidence = (
+        ProfileEvidenceExtractor().extract(profile_source_records)
+        if settings.allow_inferred_profile
+        else []
+    )
+    normalized_repository.add_profile_evidence_batch(profile_evidence)
+    profile_candidates = [
+        hypothesis.to_record(
+            user_id=user_id,
+            session_id=request.session_id,
+            observed_at=timestamp,
+        )
+        for hypothesis in ProfileAccumulator().accumulate(
+            normalized_repository.list_profile_evidence(user_id=user_id)
+        )
+    ]
+    profile_operations = MemoryOperationPlanner().plan(
+        profile_candidates,
+        existing_v2_records(user_id=user_id, session_id=request.session_id),
+        WritePolicyContext(settings=settings),
+    )
+    persisted_profile_records = (
+        normalized_repository.apply_operations(profile_operations, created_at=timestamp)
+        if can_v2_autowrite
+        else []
+    )
+    can_legacy_autowrite = (
+        request.options.auto_write
+        and preprocessed_turn.memory_command
+        not in {
+            MemoryCommand.DO_NOT_REMEMBER,
+            MemoryCommand.FORGET,
+        }
+        and not any(operation.requires_user_review for operation in operations)
+    )
+    result = (
+        runtime.ingest_turn(request.text, source=turn_id, timestamp=timestamp)
+        if can_legacy_autowrite
+        else {
+            "accepted_memories": [],
+            "accepted_inferred_memories": [],
+            "write_decisions": [],
+        }
+    )
     return {
         "turn_id": turn_id,
-        "candidate_memories": result["candidates"] if request.options.return_candidates else [],
-        "write_decisions": result["write_decisions"],
-        "operations": [],
-        "active_memory_delta": {
+        "preprocessed_turn": {
+            "language": preprocessed_turn.language,
+            "memory_command": (
+                preprocessed_turn.memory_command.value if preprocessed_turn.memory_command else None
+            ),
+            "time_expressions": preprocessed_turn.time_expressions,
+            "text_hash": preprocessed_turn.text_hash,
+        },
+        "candidate_memories": (
+            [record_to_dict(candidate) for candidate in candidates]
+            if request.options.return_candidates
+            else []
+        ),
+        "write_decisions": [operation_to_dict(operation) for operation in operations],
+        "operations": [operation_to_dict(operation) for operation in operations],
+        "event_states": [event.model_dump(mode="json") for event in event_states],
+        "persisted_event_states": [
+            event.model_dump(mode="json") for event in persisted_event_states
+        ],
+        "profile_evidence": [item.to_dict() for item in profile_evidence],
+        "profile_candidates": [record_to_dict(record) for record in profile_candidates],
+        "profile_operations": [
+            operation_to_dict(operation) for operation in profile_operations
+        ],
+        "persisted_profile_records": [
+            record_to_dict(record) for record in persisted_profile_records
+        ],
+        "persisted_records": [record_to_dict(record) for record in persisted_records],
+        "active_memory_delta": v2_active_memory_delta(operations),
+        "legacy_active_memory_delta": {
             "created": len(result["accepted_memories"]) + len(result["accepted_inferred_memories"]),
             "updated": 0,
             "rejected": len(
@@ -196,17 +542,54 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
 def v2_memory_query(user_id: str, request: V2MemoryQueryRequest) -> dict[str, Any]:
     runtime = manager.get(v2_session_key(user_id, request.session_id))
     timestamp = normalize_timestamp(request.timestamp)
-    result = runtime.query(
+    retrieval_plan = RetrievalPlanner().plan(
         request.query,
-        timestamp=timestamp,
-        limit=request.options.max_prompt_memories,
+        max_prompt_memories=request.options.max_prompt_memories,
     )
+    repository = build_normalized_repository()
+    all_normalized_records = repository.list_records(
+        user_id=user_id,
+        session_id=request.session_id,
+        status=None,
+        limit=200,
+    )
+    normalized_records = repository.list_records(
+        user_id=user_id,
+        session_id=request.session_id,
+        limit=200,
+    )
+    planned_records = (
+        [
+            record
+            for record in normalized_records
+            if record.layer in retrieval_plan.include_layers
+        ]
+        if retrieval_plan.include_layers
+        else normalized_records
+    )
+    result = (
+        query_v2_records(
+            runtime,
+            query_text=request.query,
+            timestamp=timestamp,
+            limit=request.options.max_prompt_memories,
+            records=planned_records,
+            plan=retrieval_plan,
+        )
+        if planned_records or all_normalized_records
+        else runtime.query(
+            request.query,
+            timestamp=timestamp,
+            limit=request.options.max_prompt_memories,
+        )
+    )
+    plan_payload = retrieval_plan.to_dict()
+    if not all_normalized_records:
+        plan_payload["retrieval_modes"] = ["keyword", "temporal", "recent"]
+    plan_payload["max_prompt_memories"] = request.options.max_prompt_memories
+    plan_payload["include_debug"] = request.options.include_debug
     return {
-        "retrieval_plan": {
-            "retrieval_modes": ["keyword", "temporal", "recent"],
-            "max_prompt_memories": request.options.max_prompt_memories,
-            "include_debug": request.options.include_debug,
-        },
+        "retrieval_plan": plan_payload,
         "candidates": result["relevant_memories"],
         "gate": result["memory_gate"],
         "compiled_context": result["compiled_context"],
@@ -218,16 +601,204 @@ def v2_memory_query(user_id: str, request: V2MemoryQueryRequest) -> dict[str, An
 def v2_prompt_context(user_id: str, request: V2MemoryQueryRequest) -> dict[str, Any]:
     runtime = manager.get(v2_session_key(user_id, request.session_id))
     timestamp = normalize_timestamp(request.timestamp)
-    result = runtime.prompt_context(
+    retrieval_plan = RetrievalPlanner().plan(
         request.query,
-        timestamp=timestamp,
-        limit=request.options.max_prompt_memories,
+        max_prompt_memories=request.options.max_prompt_memories,
+    )
+    repository = build_normalized_repository()
+    all_normalized_records = repository.list_records(
+        user_id=user_id,
+        session_id=request.session_id,
+        status=None,
+        limit=200,
+    )
+    normalized_records = repository.list_records(
+        user_id=user_id,
+        session_id=request.session_id,
+        limit=200,
+    )
+    planned_records = (
+        [
+            record
+            for record in normalized_records
+            if record.layer in retrieval_plan.include_layers
+        ]
+        if retrieval_plan.include_layers
+        else normalized_records
+    )
+    result = (
+        prompt_context_from_v2_records(
+            runtime,
+            query_text=request.query,
+            timestamp=timestamp,
+            limit=request.options.max_prompt_memories,
+            records=planned_records,
+        )
+        if planned_records or all_normalized_records
+        else runtime.prompt_context(
+            request.query,
+            timestamp=timestamp,
+            limit=request.options.max_prompt_memories,
+        )
     )
     return {
         "system_guidance": result["system_prompt"],
         "memory_context": result["compiled_context"],
         "response_policy": result["response_policy"],
         "assembled_prompt": result["assembled_prompt"],
+    }
+
+
+@app.get("/v2/users/{user_id}/memory/settings")
+def v2_get_memory_settings(user_id: str) -> dict[str, Any]:
+    return {"settings": build_normalized_repository().get_user_settings(user_id).to_dict()}
+
+
+@app.put("/v2/users/{user_id}/memory/settings")
+def v2_update_memory_settings(
+    user_id: str,
+    request: V2MemorySettingsRequest,
+) -> dict[str, Any]:
+    repository = build_normalized_repository()
+    settings = settings_from_request(request, repository.get_user_settings(user_id))
+    return {
+        "settings": repository.upsert_user_settings(user_id, settings).to_dict(),
+    }
+
+
+@app.post("/v2/users/{user_id}/memory/{memory_id}/delete")
+def v2_delete_memory(
+    user_id: str,
+    memory_id: str,
+    request: V2DeleteMemoryRequest,
+) -> dict[str, Any]:
+    deleted = build_normalized_repository().mark_record_deleted(
+        memory_id,
+        user_id=user_id,
+        reason=request.reason,
+        updated_at=normalize_timestamp(request.timestamp),
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory not found.")
+    return {"deleted": True, "memory_id": memory_id}
+
+
+@app.post("/v2/users/{user_id}/memory/{memory_id}/correct")
+def v2_correct_memory(
+    user_id: str,
+    memory_id: str,
+    request: V2CorrectMemoryRequest,
+) -> dict[str, Any]:
+    corrected = build_normalized_repository().correct_record(
+        memory_id,
+        user_id=user_id,
+        value=request.value,
+        evidence=request.evidence,
+        confidence=request.confidence,
+        corrected_at=normalize_timestamp(request.timestamp),
+    )
+    if corrected is None:
+        raise HTTPException(status_code=404, detail="Memory not found.")
+    return {"corrected_memory": record_to_dict(corrected)}
+
+
+@app.post("/v2/users/{user_id}/memory/forget-all")
+def v2_forget_all(user_id: str, request: V2ForgetAllRequest) -> dict[str, Any]:
+    deleted_count = build_normalized_repository().forget_all(
+        user_id=user_id,
+        session_id=request.session_id,
+        reason=request.reason,
+        updated_at=normalize_timestamp(request.timestamp),
+    )
+    return {"deleted_count": deleted_count}
+
+
+@app.get("/v2/users/{user_id}/memory/audit")
+def v2_memory_audit(user_id: str, limit: int = 100) -> dict[str, Any]:
+    return {
+        "audit_events": build_normalized_repository().list_audit_events(
+            user_id=user_id,
+            limit=limit,
+        )
+    }
+
+
+@app.get("/v2/users/{user_id}/memory/audit/export")
+def v2_memory_audit_export(user_id: str) -> dict[str, Any]:
+    return build_normalized_repository().export_user_memory(user_id=user_id)
+
+
+@app.get("/v2/users/{user_id}/memory/events")
+def v2_memory_events(
+    user_id: str,
+    status: str | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    return {
+        "event_states": [
+            event.model_dump(mode="json")
+            for event in build_normalized_repository().list_event_states(
+                user_id=user_id,
+                status=status,
+                limit=limit,
+            )
+        ]
+    }
+
+
+@app.get("/v2/users/{user_id}/memory/profile-evidence")
+def v2_profile_evidence(
+    user_id: str,
+    dimension: str | None = None,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    return {
+        "profile_evidence": [
+            item.to_dict()
+            for item in build_normalized_repository().list_profile_evidence(
+                user_id=user_id,
+                dimension=dimension,
+                limit=limit,
+            )
+        ]
+    }
+
+
+@app.get("/v2/users/{user_id}/memory/review-queue")
+def v2_memory_review_queue(
+    user_id: str,
+    status: str = "pending",
+    limit: int = 100,
+) -> dict[str, Any]:
+    return {
+        "review_items": build_normalized_repository().list_review_items(
+            user_id=user_id,
+            status=status,
+            limit=limit,
+        )
+    }
+
+
+@app.post("/v2/users/{user_id}/memory/review-queue/{review_id}/resolve")
+def v2_resolve_memory_review(
+    user_id: str,
+    review_id: str,
+    request: V2ResolveReviewRequest,
+) -> dict[str, Any]:
+    repository = build_normalized_repository()
+    review_item = repository.get_review_item(review_id, user_id=user_id)
+    if review_item is None or review_item["status"] != "pending":
+        raise HTTPException(status_code=404, detail="Review item not found.")
+    persisted_records = repository.resolve_review_item(
+        review_id,
+        approve=request.approve,
+        user_id=user_id,
+        resolved_at=normalize_timestamp(request.timestamp),
+    )
+    return {
+        "review_id": review_id,
+        "status": "approved" if request.approve else "rejected",
+        "persisted_records": [record_to_dict(record) for record in persisted_records],
     }
 
 

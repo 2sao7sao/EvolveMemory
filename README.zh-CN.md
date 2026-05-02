@@ -164,10 +164,21 @@ Phase 2 优化规格已纳入仓库：
 - 增加 `MemoryItem -> MemoryRecord` adapter，为后续 normalized storage 做准备。
 - `MemoryUseGate` 扩展到 Phase 2 的 7 个 action：`use_directly`、`style_only`、`follow_up`、`clarify`、`hidden_constraint`、`summarize_only`、`suppress`。
 - `ContextCompiler` 将上下文拆成 direct facts、style policy、event follow-up cues、hidden constraints、clarification prompts。
-- 新增 `/v2/users/{user_id}/turns/ingest`、`/v2/users/{user_id}/memory/query`、`/v2/users/{user_id}/prompt-context`，提供 Phase 2 API 形态。
+- `NormalizedSQLiteMemoryRepository` 增加 Phase 2 normalized `memory_records`、`memory_evidence`、`memory_audit_events`、`memory_review_queue`、`memory_user_settings`、`event_memory_states` 表、索引、CRUD、tombstone delete、operation application 和旧 `MemoryStore` 迁移路径。
+- `WeightedMemoryWriteEvaluatorV2`、`ContradictionDetector`、`MemoryOperationPlanner` 增加第一版确定性写入治理：加权评分、硬规则、重复处理、review routing 和 supersession planning。
+- `TurnPreprocessor`、`MemoryCommandDetector`、`SensitivityClassifier`、`RuleMemoryProposalExtractor` 增加第一版 Phase 2 proposal extraction pipeline，同时保留无网络依赖的 LLM extractor 边界。
+- `ProfileEvidenceExtractor`、`ProfileAccumulator` 增加第一版长期画像 evidence ledger：重复行为信号会形成可 review 的 `inferred_profile` 候选，而不是单轮对话就下心理结论。
+- `CareerEventSkill`、`LearningEventSkill`、`LifeEventSkill` 增加第一版职业、备考、关系变化、搬家、入职事件状态 skill，用于进展识别和 follow-up 判断。
+- 新增 `/v2/users/{user_id}/turns/ingest`、`/v2/users/{user_id}/memory/query`、`/v2/users/{user_id}/prompt-context`，提供 Phase 2 API 形态；v2 ingest 会将 planned operations 落到 normalized SQLite，v2 query 会优先使用 normalized records。
+- `/v2/users/{user_id}/memory/audit` 暴露 normalized lifecycle audit events。
+- `/v2/users/{user_id}/memory/review-queue` 和 `/v2/users/{user_id}/memory/review-queue/{review_id}/resolve` 增加第一版需要用户确认记忆的 approve / reject flow。
+- `/v2/users/{user_id}/memory/settings`、`/v2/users/{user_id}/memory/{memory_id}/delete`、`/v2/users/{user_id}/memory/{memory_id}/correct`、`/v2/users/{user_id}/memory/forget-all`、`/v2/users/{user_id}/memory/events` 增加用户治理和事件状态 API。
+- `/v2/users/{user_id}/memory/audit/export` 支持导出 normalized records、settings、review items、event states 和 audit events，方便检查和迁移。
+- `/v2/users/{user_id}/memory/profile-evidence` 暴露 inferred profile hypotheses 背后的支持证据。
+- `QueryIntentClassifier` 和 `RetrievalPlanner` 增加第一版进入 gate 前的确定性 intent-aware retrieval plan。
 - `evals/runner.py` 增加第一版 gate eval smoke suite。
 
-这还不是完整 Phase 2。LLM extraction、normalized SQLite tables、hybrid retrieval、event skills、review APIs 和 privacy governance 会作为后续里程碑继续实现。
+这还不是完整 Phase 2。LLM extraction、embedding-backed hybrid retrieval、更多 event skills、settings UI、batch review、migration CLI 和 privacy hardening 会作为后续里程碑继续实现。
 
 ---
 

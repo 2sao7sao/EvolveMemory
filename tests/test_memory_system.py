@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
@@ -11,23 +12,38 @@ from fastapi.testclient import TestClient
 from memory_system import (
     DialogueMemoryExtractor,
     DiskSessionRepository,
+    CareerEventSkill,
+    EventSkillRegistry,
+    MemoryOperationPlanner,
+    MemoryCommand,
+    MemoryCommandDetector,
     MemoryItem,
     MemoryLayer,
     MemoryRecord,
     MemoryUseAction,
     MemoryUseGate,
+    NormalizedSQLiteMemoryRepository,
     MemorySlotRegistry,
     MemoryStore,
     MemoryType,
     MemoryWriteEvaluator,
     ProfileInferencer,
+    ProfileAccumulator,
+    ProfileEvidenceExtractor,
     PromptContextBuilder,
     QueryMemoryRetriever,
+    QueryIntentClassifier,
+    RetrievalPlanner,
     ResponsePolicyEngine,
+    RuleMemoryProposalExtractor,
+    Sensitivity,
+    TurnPreprocessor,
     SessionMemoryRuntime,
     SQLiteSessionRepository,
     StateDynamics,
     StructuredMemoryParser,
+    WeightedMemoryWriteEvaluatorV2,
+    WritePolicyContext,
 )
 from app import app
 
@@ -181,6 +197,143 @@ class MemorySystemTest(unittest.TestCase):
         self.assertEqual(record.allowed_use[0].value, "style")
         self.assertEqual(record.metadata["legacy_type"], "preference")
 
+    def test_write_evaluator_v2_rejects_do_not_remember_command(self) -> None:
+        item = self.extractor.extract(
+            "回答直接一点。",
+            source="turn_1",
+            timestamp=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+        )[0]
+        record = MemoryRecord.from_memory_item(item, user_id="user-1")
+
+        operation = WeightedMemoryWriteEvaluatorV2().evaluate(
+            record,
+            context=WritePolicyContext(user_command="do_not_remember"),
+        )
+
+        self.assertEqual(operation.operation.value, "reject")
+        self.assertEqual(operation.score, 0.0)
+
+    def test_write_evaluator_v2_supersedes_exclusive_conflict(self) -> None:
+        old_item = self.extractor.extract(
+            "我现在单身。",
+            source="turn_1",
+            timestamp=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+        )[0]
+        new_item = self.extractor.extract(
+            "我已经恋爱了。",
+            source="turn_2",
+            timestamp=datetime(2026, 4, 16, 10, 0, tzinfo=self.tz),
+        )[0]
+        old_record = MemoryRecord.from_memory_item(old_item, user_id="user-1")
+        new_record = MemoryRecord.from_memory_item(new_item, user_id="user-1")
+
+        operation = WeightedMemoryWriteEvaluatorV2().evaluate(new_record, [old_record])
+
+        self.assertEqual(operation.operation.value, "supersede")
+        self.assertEqual(operation.target_memory_id, old_record.id)
+
+    def test_write_evaluator_v2_routes_low_confidence_sensitive_memory_to_review(self) -> None:
+        item = MemoryItem(
+            memory_type=MemoryType.STATE,
+            key="current_emotional_state",
+            value="anxious",
+            confidence=0.6,
+            source="turn_1",
+            evidence="可能有点焦虑",
+            valid_from=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+            confirmed_by_user=True,
+            dynamics=StateDynamics.FLUID,
+            tags=["sensitive"],
+        )
+        record = MemoryRecord.from_memory_item(item, user_id="user-1")
+
+        operation = WeightedMemoryWriteEvaluatorV2().evaluate(record)
+
+        self.assertEqual(operation.operation.value, "ask_user_confirmation")
+        self.assertTrue(operation.requires_user_review)
+
+    def test_operation_planner_simulates_prior_candidates_for_duplicates(self) -> None:
+        item = self.extractor.extract(
+            "回答直接一点。",
+            source="turn_1",
+            timestamp=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+        )[0]
+        first = MemoryRecord.from_memory_item(item, user_id="user-1")
+        second = MemoryRecord.from_memory_item(item, user_id="user-1")
+
+        operations = MemoryOperationPlanner().plan([first, second], [])
+
+        self.assertEqual(operations[0].operation.value, "create")
+        self.assertEqual(operations[1].operation.value, "add_evidence_only")
+        self.assertEqual(operations[1].target_memory_id, first.id)
+
+    def test_turn_preprocessor_detects_memory_commands(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        turn = TurnPreprocessor().preprocess(
+            text="记住，我喜欢你先给结论。",
+            timestamp=timestamp,
+        )
+        do_not_remember = MemoryCommandDetector().detect("别记我的感情状态。")
+
+        self.assertEqual(turn.language, "zh-CN")
+        self.assertEqual(turn.memory_command, MemoryCommand.REMEMBER)
+        self.assertIn("turn_", turn.turn_id)
+        self.assertEqual(do_not_remember, MemoryCommand.DO_NOT_REMEMBER)
+
+    def test_rule_memory_proposal_extractor_respects_do_not_remember(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        turn = TurnPreprocessor().preprocess(
+            text="别记，我现在单身。",
+            timestamp=timestamp,
+        )
+
+        proposals = RuleMemoryProposalExtractor().propose(turn, user_id="user-1")
+
+        self.assertEqual(proposals, [])
+
+    def test_rule_memory_proposal_extractor_outputs_phase2_records(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        turn = TurnPreprocessor().preprocess(
+            text="我最近准备面试，有点焦虑。回答直接一点。",
+            timestamp=timestamp,
+            turn_id="turn_1",
+        )
+
+        proposals = RuleMemoryProposalExtractor().propose(
+            turn,
+            user_id="user-1",
+            session_id="session-1",
+        )
+        by_key = {proposal.key: proposal for proposal in proposals}
+
+        self.assertEqual(by_key["life_event"].layer, MemoryLayer.EPISODIC_EVENT)
+        self.assertEqual(by_key["current_emotional_state"].sensitivity.value, "sensitive")
+        self.assertEqual(by_key["communication_style"].metadata["language"], "zh-CN")
+        self.assertEqual(by_key["communication_style"].source_text_hash, turn.text_hash)
+
+    def test_career_event_skill_detects_and_updates_interview_event(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        turn = TurnPreprocessor().preprocess(
+            text="我最近准备面试。",
+            timestamp=timestamp,
+            turn_id="turn_1",
+        )
+        proposals = RuleMemoryProposalExtractor().propose(turn, user_id="user-1")
+        skill = CareerEventSkill()
+
+        events = skill.detect(proposals)
+        should_follow_up = skill.should_follow_up(
+            events[0],
+            query="面试怎么准备？",
+            now=datetime(2026, 5, 2, 9, 0, tzinfo=self.tz),
+        )
+        updated = skill.update_state(events[0], proposals[0])
+
+        self.assertEqual(events[0].event_type, "career.interview_preparation")
+        self.assertEqual(events[0].stage, "preparing")
+        self.assertTrue(should_follow_up)
+        self.assertEqual(updated.status, "progressing")
+
     def test_prompt_builder_outputs_assembled_prompt(self) -> None:
         turns = [
             "我最近在找工作。",
@@ -231,6 +384,234 @@ class MemorySystemTest(unittest.TestCase):
 
             self.assertIn("work_status", keys)
             self.assertIn("communication_style", keys)
+
+    def test_normalized_sqlite_repository_persists_memory_records(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            item = self.extractor.extract(
+                "回答直接一点。",
+                source="turn_1",
+                timestamp=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+            )[0]
+            record = MemoryRecord.from_memory_item(
+                item,
+                user_id="user-1",
+                session_id="session-1",
+            )
+
+            repo.upsert_record(record)
+            loaded = repo.get_record(str(record.id))
+            active = repo.list_records(user_id="user-1")
+
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded.key, "communication_style")
+            self.assertEqual(active[0].layer, MemoryLayer.PREFERENCE)
+            self.assertTrue(repo.mark_deleted(str(record.id)))
+            self.assertEqual(repo.list_records(user_id="user-1"), [])
+
+    def test_normalized_sqlite_repository_migrates_active_store(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            timestamp = datetime(2026, 4, 16, 9, 0, tzinfo=self.tz)
+            self.store.extend(
+                self.extractor.extract(
+                    "我最近准备面试，回答直接一点。",
+                    source="turn_1",
+                    timestamp=timestamp,
+                )
+            )
+
+            records = repo.migrate_store(
+                store=self.store,
+                user_id="user-1",
+                session_id="session-1",
+            )
+            keys = [record.key for record in repo.list_records(user_id="user-1")]
+
+            self.assertEqual(len(records), 2)
+            self.assertIn("life_event", keys)
+            self.assertIn("communication_style", keys)
+
+    def test_normalized_sqlite_repository_applies_write_operations(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+            turn = TurnPreprocessor().preprocess(
+                text="记住，回答直接一点。",
+                timestamp=timestamp,
+                turn_id="turn_1",
+            )
+            records = RuleMemoryProposalExtractor().propose(
+                turn,
+                user_id="user-1",
+                session_id="session-1",
+            )
+            operations = MemoryOperationPlanner().plan(
+                records,
+                [],
+                WritePolicyContext(user_command="remember"),
+            )
+
+            persisted = repo.apply_operations(operations, created_at=timestamp)
+            active = repo.list_records(user_id="user-1", session_id="session-1")
+            audit = repo.list_audit_events(user_id="user-1")
+
+            self.assertTrue(persisted)
+            self.assertEqual(active[0].key, "communication_style")
+            self.assertEqual(audit[0]["action"], "create")
+
+    def test_normalized_sqlite_repository_review_queue_approval(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+            record = MemoryRecord(
+                user_id="user-1",
+                session_id="session-1",
+                layer=MemoryLayer.SEMANTIC_FACT,
+                key="relationship_status",
+                value="single",
+                normalized_value="single",
+                confidence=0.6,
+                sensitivity=Sensitivity.SENSITIVE,
+                valid_from=timestamp,
+                observed_at=timestamp,
+                exclusive_group="relationship_status",
+                coexistence_rule="mutually_exclusive",
+                metadata={"evidence": "我现在单身"},
+            )
+            operation = WeightedMemoryWriteEvaluatorV2().evaluate(record)
+
+            repo.apply_operations([operation], created_at=timestamp)
+            review_items = repo.list_review_items(user_id="user-1")
+            persisted = repo.resolve_review_item(
+                str(review_items[0]["id"]),
+                approve=True,
+                user_id="user-1",
+                resolved_at=timestamp,
+            )
+
+            self.assertEqual(operation.operation.value, "ask_user_confirmation")
+            self.assertEqual(len(review_items), 1)
+            self.assertTrue(persisted)
+            self.assertEqual(repo.list_records(user_id="user-1")[0].key, "relationship_status")
+
+    def test_normalized_sqlite_repository_persists_event_states(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+            turn = TurnPreprocessor().preprocess(
+                text="我最近准备面试。",
+                timestamp=timestamp,
+                turn_id="turn_1",
+            )
+            records = RuleMemoryProposalExtractor().propose(
+                turn,
+                user_id="user-1",
+                session_id="session-1",
+            )
+            event = CareerEventSkill().detect(records)[0]
+
+            repo.upsert_event_state(event, user_id="user-1")
+            loaded = repo.list_event_states(user_id="user-1")
+
+            self.assertEqual(loaded[0].event_type, "career.interview_preparation")
+            self.assertEqual(loaded[0].stage, "preparing")
+
+    def test_event_skill_registry_detects_learning_and_life_events(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        turn = TurnPreprocessor().preprocess(
+            text="我准备考研，最近分手了。",
+            timestamp=timestamp,
+            turn_id="turn_1",
+        )
+        records = RuleMemoryProposalExtractor().propose(
+            turn,
+            user_id="user-1",
+            session_id="session-1",
+        )
+
+        event_types = {event.event_type for event in EventSkillRegistry().detect(records)}
+
+        self.assertIn("learning.exam_preparation", event_types)
+        self.assertIn("life.relationship_change", event_types)
+
+    def test_normalized_sqlite_repository_corrects_record_and_exports_audit(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+            turn = TurnPreprocessor().preprocess(
+                text="记住，回答直接一点。",
+                timestamp=timestamp,
+                turn_id="turn_1",
+            )
+            records = RuleMemoryProposalExtractor().propose(
+                turn,
+                user_id="user-1",
+                session_id="session-1",
+            )
+            operations = MemoryOperationPlanner().plan(
+                records,
+                [],
+                WritePolicyContext(user_command="remember"),
+            )
+            created = repo.apply_operations(operations, created_at=timestamp)[0]
+
+            corrected = repo.correct_record(
+                str(created.id),
+                user_id="user-1",
+                value="slow",
+                evidence="我更正一下，慢慢讲。",
+                corrected_at=timestamp,
+            )
+            export = repo.export_user_memory(user_id="user-1")
+
+            self.assertIsNotNone(corrected)
+            self.assertEqual(corrected.value, "slow")
+            self.assertEqual(repo.list_records(user_id="user-1")[0].value, "slow")
+            self.assertTrue(export["audit_events"])
+
+    def test_query_intent_classifier_and_retrieval_planner(self) -> None:
+        intent = QueryIntentClassifier().classify("面试怎么准备？")
+        plan = RetrievalPlanner().plan("面试怎么准备？", max_prompt_memories=8)
+
+        self.assertEqual(intent.name, "career_advice")
+        self.assertIn("event_state", plan.retrieval_modes)
+        self.assertIn(MemoryLayer.EPISODIC_EVENT, plan.include_layers)
+
+    def test_profile_evidence_accumulates_before_inferred_profile(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        first = TurnPreprocessor().preprocess(
+            text="回答直接一点。",
+            timestamp=timestamp,
+            turn_id="turn_1",
+        )
+        second = TurnPreprocessor().preprocess(
+            text="直接给建议。",
+            timestamp=timestamp,
+            turn_id="turn_2",
+        )
+        records = (
+            RuleMemoryProposalExtractor().propose(first, user_id="user-1")
+            + RuleMemoryProposalExtractor().propose(second, user_id="user-1")
+        )
+        evidence = ProfileEvidenceExtractor().extract(records)
+        hypotheses = ProfileAccumulator().accumulate(evidence)
+
+        self.assertTrue(evidence)
+        self.assertEqual(hypotheses, [])
+
+        third = TurnPreprocessor().preprocess(
+            text="再提醒一下，回答直接一点。",
+            timestamp=timestamp,
+            turn_id="turn_3",
+        )
+        more_records = RuleMemoryProposalExtractor().propose(third, user_id="user-1")
+        accumulated = ProfileAccumulator().accumulate(
+            evidence + ProfileEvidenceExtractor().extract(more_records)
+        )
+
+        self.assertTrue(accumulated)
+        self.assertEqual(accumulated[0].dimension, "directness_preference_level")
 
     def test_write_policy_rejects_low_value_memory(self) -> None:
         memory = MemoryItem(
@@ -434,22 +815,29 @@ class MemoryApiTest(unittest.TestCase):
         self.assertIn("response_opening", keys)
 
     def test_v2_ingest_and_memory_query_api(self) -> None:
+        session_id = f"phase2-{uuid4().hex}"
         ingest = self.client.post(
             "/v2/users/test-user/turns/ingest",
             json={
-                "session_id": "phase2",
+                "session_id": session_id,
                 "role": "user",
                 "text": "我最近准备面试，有点焦虑。回答直接一点，先给结论。",
                 "options": {"return_candidates": True},
             },
         )
         self.assertEqual(ingest.status_code, 200)
-        self.assertTrue(ingest.json()["candidate_memories"])
+        ingest_payload = ingest.json()
+        self.assertEqual(ingest_payload["preprocessed_turn"]["language"], "zh-CN")
+        self.assertTrue(ingest_payload["candidate_memories"])
+        self.assertTrue(ingest_payload["operations"])
+        self.assertTrue(ingest_payload["event_states"])
+        self.assertTrue(ingest_payload["persisted_records"])
+        self.assertTrue(ingest_payload["persisted_event_states"])
 
         query = self.client.post(
             "/v2/users/test-user/memory/query",
             json={
-                "session_id": "phase2",
+                "session_id": session_id,
                 "query": "面试怎么准备？",
                 "options": {"max_prompt_memories": 8, "include_debug": True},
             },
@@ -458,8 +846,259 @@ class MemoryApiTest(unittest.TestCase):
         self.assertEqual(query.status_code, 200)
         payload = query.json()
         self.assertIn("compiled_context", payload)
+        self.assertIn("normalized_sqlite", payload["retrieval_plan"]["retrieval_modes"])
+        self.assertEqual(payload["retrieval_plan"]["intent"]["name"], "career_advice")
         self.assertTrue(payload["gate"]["selected"])
         self.assertTrue(payload["compiled_context"]["event_followups"])
+
+        events = self.client.get("/v2/users/test-user/memory/events")
+        self.assertEqual(events.status_code, 200)
+        self.assertTrue(events.json()["event_states"])
+
+        audit = self.client.get("/v2/users/test-user/memory/audit")
+        self.assertEqual(audit.status_code, 200)
+        self.assertTrue(audit.json()["audit_events"])
+
+    def test_v2_settings_api_can_disable_memory_key(self) -> None:
+        user_id = f"settings-user-{uuid4().hex}"
+        session_id = f"settings-session-{uuid4().hex}"
+        settings = self.client.put(
+            f"/v2/users/{user_id}/memory/settings",
+            json={"disabled_keys": ["communication_style"]},
+        )
+        self.assertEqual(settings.status_code, 200)
+        self.assertIn("communication_style", settings.json()["settings"]["disabled_keys"])
+
+        ingest = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "回答直接一点。",
+                "options": {"return_candidates": True},
+            },
+        )
+
+        self.assertEqual(ingest.status_code, 200)
+        self.assertEqual(ingest.json()["operations"][0]["operation"], "reject")
+        self.assertEqual(ingest.json()["persisted_records"], [])
+
+    def test_v2_delete_and_forget_all_do_not_fallback_to_legacy_memory(self) -> None:
+        user_id = f"delete-user-{uuid4().hex}"
+        session_id = f"delete-session-{uuid4().hex}"
+        ingest = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "记住，回答直接一点。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(ingest.status_code, 200)
+        memory_id = ingest.json()["persisted_records"][0]["id"]
+
+        deleted = self.client.post(
+            f"/v2/users/{user_id}/memory/{memory_id}/delete",
+            json={"reason": "test delete"},
+        )
+        self.assertEqual(deleted.status_code, 200)
+
+        query = self.client.post(
+            f"/v2/users/{user_id}/memory/query",
+            json={"session_id": session_id, "query": "我喜欢你怎么回答？"},
+        )
+        self.assertEqual(query.status_code, 200)
+        self.assertEqual(query.json()["candidates"], [])
+
+        second_ingest = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "记住，先给结论。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(second_ingest.status_code, 200)
+        forget = self.client.post(
+            f"/v2/users/{user_id}/memory/forget-all",
+            json={"session_id": session_id, "reason": "test forget all"},
+        )
+        self.assertGreaterEqual(forget.json()["deleted_count"], 1)
+        final_query = self.client.post(
+            f"/v2/users/{user_id}/memory/query",
+            json={"session_id": session_id, "query": "我喜欢你怎么回答？"},
+        )
+        self.assertEqual(final_query.status_code, 200)
+        self.assertEqual(final_query.json()["candidates"], [])
+
+    def test_v2_correct_memory_and_audit_export_api(self) -> None:
+        user_id = f"correct-user-{uuid4().hex}"
+        session_id = f"correct-session-{uuid4().hex}"
+        ingest = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "记住，回答直接一点。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(ingest.status_code, 200)
+        memory_id = ingest.json()["persisted_records"][0]["id"]
+
+        corrected = self.client.post(
+            f"/v2/users/{user_id}/memory/{memory_id}/correct",
+            json={"value": "slow", "evidence": "我更正一下，慢慢讲。"},
+        )
+        self.assertEqual(corrected.status_code, 200)
+        self.assertEqual(corrected.json()["corrected_memory"]["value"], "slow")
+
+        export = self.client.get(f"/v2/users/{user_id}/memory/audit/export")
+        self.assertEqual(export.status_code, 200)
+        self.assertTrue(export.json()["memory_records"])
+        self.assertTrue(export.json()["audit_events"])
+
+    def test_v2_profile_evidence_accumulation_api(self) -> None:
+        user_id = f"profile-user-{uuid4().hex}"
+        session_id = f"profile-session-{uuid4().hex}"
+        first = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "回答直接一点。",
+                "options": {"return_candidates": True},
+            },
+        )
+        second = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "再提醒一下，回答直接一点。",
+                "options": {"return_candidates": True},
+            },
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(second.json()["profile_evidence"])
+        self.assertTrue(second.json()["profile_candidates"])
+        self.assertEqual(
+            second.json()["profile_operations"][0]["operation"],
+            "ask_user_confirmation",
+        )
+
+        evidence = self.client.get(f"/v2/users/{user_id}/memory/profile-evidence")
+        self.assertEqual(evidence.status_code, 200)
+        self.assertGreaterEqual(len(evidence.json()["profile_evidence"]), 2)
+
+        queue = self.client.get(f"/v2/users/{user_id}/memory/review-queue")
+        self.assertTrue(
+            any(
+                "directness_preference_level" in item["candidate_json"]
+                for item in queue.json()["review_items"]
+            )
+        )
+
+    def test_v2_review_queue_contains_before_after_diff(self) -> None:
+        user_id = f"diff-user-{uuid4().hex}"
+        session_id = f"diff-session-{uuid4().hex}"
+        self.client.put(
+            f"/v2/users/{user_id}/memory/settings",
+            json={"review_required_for_layers": ["preference"]},
+        )
+        ingest = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "记住，回答直接一点。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(ingest.status_code, 200)
+        self.assertEqual(ingest.json()["operations"][0]["operation"], "ask_user_confirmation")
+
+        queue = self.client.get(f"/v2/users/{user_id}/memory/review-queue")
+        self.assertEqual(queue.status_code, 200)
+        item = queue.json()["review_items"][0]
+
+        self.assertIn("candidate", item)
+        self.assertIn("before_after_diff", item)
+
+    def test_v2_ingest_honors_do_not_remember_command(self) -> None:
+        ingest = self.client.post(
+            "/v2/users/test-user/turns/ingest",
+            json={
+                "session_id": "phase2-private",
+                "role": "user",
+                "text": "别记，我现在单身。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(ingest.status_code, 200)
+        ingest_payload = ingest.json()
+        self.assertEqual(
+            ingest_payload["preprocessed_turn"]["memory_command"],
+            "do_not_remember",
+        )
+        self.assertEqual(ingest_payload["candidate_memories"], [])
+        self.assertEqual(ingest_payload["operations"], [])
+
+        query = self.client.post(
+            "/v2/users/test-user/memory/query",
+            json={
+                "session_id": "phase2-private",
+                "query": "我的感情状态是什么？",
+            },
+        )
+
+        self.assertEqual(query.status_code, 200)
+        self.assertEqual(query.json()["candidates"], [])
+
+    def test_v2_review_queue_approval_api(self) -> None:
+        session_id = f"phase2-review-{uuid4().hex}"
+        ingest = self.client.post(
+            "/v2/users/test-user/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "我现在单身。",
+                "options": {"return_candidates": True},
+            },
+        )
+        self.assertEqual(ingest.status_code, 200)
+        self.assertEqual(ingest.json()["operations"][0]["operation"], "ask_user_confirmation")
+
+        pending_query = self.client.post(
+            "/v2/users/test-user/memory/query",
+            json={
+                "session_id": session_id,
+                "query": "我的感情状态是什么？",
+            },
+        )
+        self.assertEqual(pending_query.status_code, 200)
+        self.assertEqual(pending_query.json()["candidates"], [])
+
+        queue = self.client.get("/v2/users/test-user/memory/review-queue")
+        self.assertEqual(queue.status_code, 200)
+        review_items = [
+            item
+            for item in queue.json()["review_items"]
+            if "relationship_status" in item["candidate_json"]
+        ]
+        self.assertTrue(review_items)
+
+        resolved = self.client.post(
+            f"/v2/users/test-user/memory/review-queue/{review_items[0]['id']}/resolve",
+            json={"approve": True},
+        )
+        self.assertEqual(resolved.status_code, 200)
+        self.assertEqual(resolved.json()["status"], "approved")
+        self.assertTrue(resolved.json()["persisted_records"])
 
 
 if __name__ == "__main__":

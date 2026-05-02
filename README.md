@@ -178,13 +178,49 @@ compatibility:
   `summarize_only`, and `suppress`.
 - `ContextCompiler` separates direct facts, style policy, event follow-up cues,
   hidden constraints, and clarification prompts.
+- `NormalizedSQLiteMemoryRepository` adds normalized Phase 2 `memory_records`,
+  `memory_evidence`, `memory_audit_events`, `memory_review_queue`,
+  `memory_user_settings`, and `event_memory_states` tables, indexes, CRUD,
+  tombstone delete, operation application, and legacy `MemoryStore` migration
+  path.
+- `WeightedMemoryWriteEvaluatorV2`, `ContradictionDetector`, and
+  `MemoryOperationPlanner` add the first deterministic write-governance layer:
+  weighted scoring, hard rules, duplicate handling, review routing, and
+  supersession planning.
+- `TurnPreprocessor`, `MemoryCommandDetector`, `SensitivityClassifier`, and
+  `RuleMemoryProposalExtractor` add the first Phase 2 proposal-extraction
+  pipeline while keeping the LLM extractor boundary dependency-free.
+- `ProfileEvidenceExtractor` and `ProfileAccumulator` add the first long-term
+  profile evidence ledger: repeated behavioral signals become reviewable
+  `inferred_profile` candidates instead of one-turn psychological conclusions.
+- `CareerEventSkill`, `LearningEventSkill`, and `LifeEventSkill` add the first
+  event-state skills for career, exam-prep, relationship-change, relocation,
+  and onboarding follow-up.
 - `/v2/users/{user_id}/turns/ingest`, `/v2/users/{user_id}/memory/query`, and
-  `/v2/users/{user_id}/prompt-context` expose the Phase 2 API shape.
+  `/v2/users/{user_id}/prompt-context` expose the Phase 2 API shape. v2 ingest
+  now persists planned operations to normalized SQLite and v2 query prefers
+  normalized records when available.
+- `/v2/users/{user_id}/memory/audit` exposes normalized lifecycle audit events.
+- `/v2/users/{user_id}/memory/review-queue` and
+  `/v2/users/{user_id}/memory/review-queue/{review_id}/resolve` add the first
+  approve/reject flow for memories that require user confirmation.
+- `/v2/users/{user_id}/memory/settings`,
+  `/v2/users/{user_id}/memory/{memory_id}/delete`,
+  `/v2/users/{user_id}/memory/{memory_id}/correct`,
+  `/v2/users/{user_id}/memory/forget-all`, and
+  `/v2/users/{user_id}/memory/events` add user-governance and event-state APIs.
+- `/v2/users/{user_id}/memory/audit/export` exports normalized records,
+  settings, review items, event states, and audit events for inspection or
+  portability.
+- `/v2/users/{user_id}/memory/profile-evidence` exposes the supporting evidence
+  behind inferred profile hypotheses.
+- `QueryIntentClassifier` and `RetrievalPlanner` add the first deterministic
+  intent-aware retrieval plan before the gate.
 - `evals/runner.py` adds the first gate evaluation smoke suite.
 
-This is not the full Phase 2 scope yet. LLM extraction, normalized SQLite
-tables, hybrid retrieval, event skills, review APIs, and privacy governance are
-tracked as the next implementation milestones.
+This is not the full Phase 2 scope yet. LLM extraction, embedding-backed hybrid
+retrieval, more event skills, settings UI, batch review, migration CLI, and
+privacy hardening are tracked as the next implementation milestones.
 
 ---
 
