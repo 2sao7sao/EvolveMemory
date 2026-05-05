@@ -175,9 +175,11 @@ compatibility:
   while preparing normalized storage.
 - `MemoryUseGate` now supports the Phase 2 action set:
   `use_directly`, `style_only`, `follow_up`, `clarify`, `hidden_constraint`,
-  `summarize_only`, and `suppress`.
+  `summarize_only`, and `suppress`, and now treats `allowed_use` and sensitivity
+  as hard runtime constraints.
 - `ContextCompiler` separates direct facts, style policy, event follow-up cues,
-  hidden constraints, and clarification prompts.
+  hidden constraints, and clarification prompts. `PromptContextBuilder` only
+  renders gate-approved visible direct facts in the raw memory section.
 - `NormalizedSQLiteMemoryRepository` adds normalized Phase 2 `memory_records`,
   `memory_evidence`, `memory_audit_events`, `memory_review_queue`,
   `memory_user_settings`, and `event_memory_states` tables, indexes, CRUD,
@@ -195,7 +197,8 @@ compatibility:
   raw model output to write memory directly.
 - `ProfileEvidenceExtractor` and `ProfileAccumulator` add the first long-term
   profile evidence ledger: repeated behavioral signals become reviewable
-  `inferred_profile` candidates instead of one-turn psychological conclusions.
+  `inferred_profile` candidates instead of one-turn psychological conclusions,
+  while counter-evidence and recency decay reduce sticky hypotheses.
 - `CareerEventSkill`, `LearningEventSkill`, and `LifeEventSkill` add the first
   event-state skills for career, exam-prep, relationship-change, relocation,
   and onboarding follow-up.
@@ -219,7 +222,7 @@ compatibility:
   behind inferred profile hypotheses.
 - `QueryIntentClassifier`, `RetrievalPlanner`, and `HybridMemoryScorer` add the
   first intent-aware and embedding-provider-ready retrieval boundary before the
-  gate.
+  gate, and v2 query now uses that scorer before memory-use gating.
 - `evals/runner.py` adds the first gate evaluation smoke suite.
 
 This is not the full Phase 2 scope yet. Live LLM provider integration, real
@@ -904,10 +907,14 @@ Use the memory gate as the first control layer.
 ## Current Limitations
 
 - The built-in raw dialogue extractor is rule-based and Chinese-first.
-- Retrieval is keyword and rule weighted, not embedding based.
+- Retrieval has an executable hybrid boundary, but the bundled embedding provider
+  is deterministic and offline; production semantic retrieval still needs a real
+  embedding provider and vector index.
 - Persistence is local JSON or SQLite; production migrations, encryption, backups, and auth are still missing.
-- Profile inference is deterministic and narrow.
-- Event progress skills are documented, but only the first gate-triggered follow-up behavior is implemented.
+- Profile inference is deterministic and narrow, although it now supports
+  counter-evidence and decay.
+- Event progress skills are implemented for the first domains, but live follow-up
+  updates and richer event resolution still need work.
 - There is no production LLM call in this repository yet.
 - There is no authentication layer around the FastAPI service.
 - There is no UI for memory review, correction, or audit inspection.
@@ -921,9 +928,9 @@ be upgraded independently.
 ## Roadmap
 
 1. Add domain event skills for career, learning, relationship, and project progress.
-2. Add cooldown-aware event follow-up and event-to-state conversion rules.
+2. Add write-back for event follow-up usage, event-to-state conversion, and richer resolution rules.
 3. Connect `StructuredMemoryParser` to a production LLM extraction call.
-4. Add semantic retrieval with embeddings before `MemoryUseGate`.
+4. Replace the deterministic embedding stub with production semantic retrieval before `MemoryUseGate`.
 5. Add configurable decay policies by memory type and dynamics.
 6. Add learned gate thresholds and offline personalization evaluation.
 7. Add contradiction detection beyond exclusive groups.

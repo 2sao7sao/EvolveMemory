@@ -22,7 +22,7 @@ from memory_system.models import (
 )
 from memory_system.profiles import ProfileAccumulator, ProfileEvidenceExtractor
 from memory_system.registry import MemorySlotRegistry
-from memory_system.retrieval import RetrievalPlan, RetrievalPlanner
+from memory_system.retrieval import HybridMemoryScorer, RetrievalPlan, RetrievalPlanner
 from memory_system.schema import MemoryItem, MemoryType, StateDynamics
 from memory_system.service import SessionMemoryRuntime
 from memory_system.settings import UserMemorySettings
@@ -262,7 +262,45 @@ def record_to_memory_item(record: MemoryRecord) -> MemoryItem:
         dynamics=dynamics,
         tags=list(record.tags),
         last_updated=record.observed_at,
+        allowed_use=[item.value for item in record.allowed_use],
+        sensitivity=record.sensitivity.value,
+        memory_id=str(record.id),
     )
+
+
+def apply_event_followup_controls(
+    items: list[MemoryItem],
+    *,
+    event_states: list[Any],
+    timestamp: datetime,
+) -> list[MemoryItem]:
+    states_by_memory_id = {str(event.memory_id): event for event in event_states}
+    controlled: list[MemoryItem] = []
+    for item in items:
+        state = states_by_memory_id.get(item.memory_id or "")
+        if state is None:
+            controlled.append(item)
+            continue
+        tags = set(item.tags)
+        policy = state.followup_policy
+        cooldown_active = (
+            policy.last_followed_up_at is not None
+            and (timestamp - policy.last_followed_up_at).days < policy.cooldown_days
+        )
+        exhausted = policy.followup_count >= policy.max_followups_per_event
+        if (
+            state.status in {"resolved", "stale", "abandoned"}
+            or not policy.enabled
+            or policy.user_rejected_followup
+            or cooldown_active
+            or exhausted
+        ):
+            tags.add("event_followup_suppressed")
+        if state.expected_next_signals:
+            tags.add("event_has_expected_signals")
+        item.tags = sorted(tags)
+        controlled.append(item)
+    return controlled
 
 
 def query_v2_records(
@@ -273,13 +311,27 @@ def query_v2_records(
     limit: int,
     records: list[MemoryRecord],
     plan: RetrievalPlan,
+    event_states: list[Any] | None = None,
 ) -> dict[str, Any]:
     active = [
         item
         for item in (record_to_memory_item(record) for record in records)
         if item.is_active(timestamp)
     ]
-    candidates = runtime.retriever.retrieve(query_text, active, limit=plan.candidate_limit)
+    active = apply_event_followup_controls(
+        active,
+        event_states=event_states or [],
+        timestamp=timestamp,
+    )
+    candidates = [
+        score.memory
+        for score in HybridMemoryScorer().score(
+            query_text,
+            active,
+            now=timestamp,
+            plan=plan,
+        )[: plan.candidate_limit]
+    ]
     gate_result = runtime.use_gate.select(query_text, candidates, now=timestamp, limit=limit)
     relevant = gate_result.selected
     policy = runtime.policy_engine.build_from_memories(relevant)
@@ -304,6 +356,7 @@ def prompt_context_from_v2_records(
     timestamp: datetime,
     limit: int,
     records: list[MemoryRecord],
+    event_states: list[Any] | None = None,
 ) -> dict[str, Any]:
     query_result = query_v2_records(
         runtime,
@@ -312,6 +365,7 @@ def prompt_context_from_v2_records(
         limit=limit,
         records=records,
         plan=RetrievalPlanner().plan(query_text, max_prompt_memories=limit),
+        event_states=event_states,
     )
     memories = [
         MemoryItem.from_dict(item)
@@ -558,6 +612,7 @@ def v2_memory_query(user_id: str, request: V2MemoryQueryRequest) -> dict[str, An
         session_id=request.session_id,
         limit=200,
     )
+    event_states = repository.list_event_states(user_id=user_id, limit=200)
     planned_records = (
         [
             record
@@ -575,6 +630,7 @@ def v2_memory_query(user_id: str, request: V2MemoryQueryRequest) -> dict[str, An
             limit=request.options.max_prompt_memories,
             records=planned_records,
             plan=retrieval_plan,
+            event_states=event_states,
         )
         if planned_records or all_normalized_records
         else runtime.query(
@@ -617,6 +673,7 @@ def v2_prompt_context(user_id: str, request: V2MemoryQueryRequest) -> dict[str, 
         session_id=request.session_id,
         limit=200,
     )
+    event_states = repository.list_event_states(user_id=user_id, limit=200)
     planned_records = (
         [
             record
@@ -633,6 +690,7 @@ def v2_prompt_context(user_id: str, request: V2MemoryQueryRequest) -> dict[str, 
             timestamp=timestamp,
             limit=request.options.max_prompt_memories,
             records=planned_records,
+            event_states=event_states,
         )
         if planned_records or all_normalized_records
         else runtime.prompt_context(

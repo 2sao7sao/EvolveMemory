@@ -187,6 +187,28 @@ class MemorySystemTest(unittest.TestCase):
         self.assertEqual(result.decisions[0].action, MemoryUseAction.FOLLOW_UP)
         self.assertEqual(result.decisions[0].layer, MemoryLayer.EPISODIC_EVENT)
 
+    def test_memory_use_gate_enforces_never_prompt_allowed_use(self) -> None:
+        memory = MemoryItem(
+            memory_type=MemoryType.STATE,
+            key="restricted_note",
+            value="do_not_surface",
+            confidence=0.95,
+            source="turn_1",
+            evidence="private evidence",
+            valid_from=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+            allowed_use=["never_prompt"],
+            sensitivity="restricted",
+        )
+
+        result = self.use_gate.select(
+            "这个信息可以用吗？",
+            [memory],
+            now=datetime(2026, 4, 16, 12, 0, tzinfo=self.tz),
+        )
+
+        self.assertFalse(result.selected)
+        self.assertEqual(result.suppressed[0].action, MemoryUseAction.SUPPRESS)
+
     def test_memory_record_adapter_maps_legacy_item_to_phase2_layer(self) -> None:
         item = self.extractor.extract(
             "回答直接一点。",
@@ -391,6 +413,43 @@ class MemorySystemTest(unittest.TestCase):
         self.assertIn("[Relevant User Memory]", context["assembled_prompt"])
         self.assertIn("[Response Policy]", context["assembled_prompt"])
         self.assertIn("work_status", context["assembled_prompt"])
+
+    def test_prompt_builder_does_not_render_policy_only_memory_as_raw_memory(self) -> None:
+        memory = MemoryItem(
+            memory_type=MemoryType.PROFILE,
+            key="directness_preference_level",
+            value="high",
+            confidence=0.82,
+            source="profile",
+            evidence="raw-private-quote",
+            valid_from=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+            allowed_use=["style"],
+        )
+        gate_result = self.use_gate.select(
+            "怎么回答更适合我？",
+            [memory],
+            now=datetime(2026, 4, 16, 12, 0, tzinfo=self.tz),
+        )
+        policy = self.policy_engine.build_from_memories(gate_result.selected)
+        compiled = self.prompt_builder.context_compiler.compile(
+            query="怎么回答更适合我？",
+            gate_result=gate_result,
+            response_policy=policy,
+        )
+
+        context = self.prompt_builder.build(
+            "怎么回答更适合我？",
+            gate_result.selected,
+            policy,
+            memory_gate=gate_result.to_dict(),
+            compiled_context=compiled.to_dict(),
+        )
+
+        self.assertNotIn("raw-private-quote", context["assembled_prompt"])
+        self.assertNotIn(
+            "- directness_preference_level: high\n[Response Policy]",
+            context["assembled_prompt"],
+        )
 
     def test_disk_repository_persists_memories(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -649,6 +708,33 @@ class MemorySystemTest(unittest.TestCase):
         self.assertEqual(accumulated[0].dimension, "directness_preference_level")
         self.assertTrue(accumulated[0].supporting_quotes)
 
+    def test_profile_accumulator_uses_counter_evidence_to_avoid_sticky_profiles(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        concise_records = []
+        detailed_records = []
+        for index in range(2):
+            concise_turn = TurnPreprocessor().preprocess(
+                text="别太啰嗦。",
+                timestamp=timestamp,
+                turn_id=f"concise_{index}",
+            )
+            detailed_turn = TurnPreprocessor().preprocess(
+                text="多给细节。",
+                timestamp=timestamp,
+                turn_id=f"detailed_{index}",
+            )
+            concise_records.extend(
+                RuleMemoryProposalExtractor().propose(concise_turn, user_id="user-1")
+            )
+            detailed_records.extend(
+                RuleMemoryProposalExtractor().propose(detailed_turn, user_id="user-1")
+            )
+
+        evidence = ProfileEvidenceExtractor().extract(concise_records + detailed_records)
+        hypotheses = ProfileAccumulator().accumulate(evidence)
+
+        self.assertFalse([item for item in hypotheses if item.dimension == "detail_tolerance"])
+
     def test_hybrid_memory_scorer_scores_keyword_embedding_and_layer_prior(self) -> None:
         timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
         memory = MemoryItem(
@@ -665,6 +751,7 @@ class MemorySystemTest(unittest.TestCase):
         scores = HybridMemoryScorer().score("面试怎么准备？", [memory], now=timestamp, plan=plan)
 
         self.assertEqual(scores[0].memory.key, "life_event")
+        self.assertGreater(scores[0].factors["keyword"], 0)
         self.assertGreater(scores[0].factors["layer_prior"], 0.9)
 
     def test_write_policy_rejects_low_value_memory(self) -> None:

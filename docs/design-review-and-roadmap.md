@@ -1,6 +1,6 @@
 # EvolveMemory Design Review And Iteration Roadmap
 
-Date: 2026-05-02
+Date: 2026-05-05
 
 This document reviews the current system against the original product idea:
 
@@ -80,11 +80,13 @@ Current implementation:
 - `ContextCompiler` separates direct facts, style policy, event follow-up cues, hidden constraints, and clarification prompts.
 - `ResponsePolicyEngine` converts memory into tone, detail level, structure, decision mode, pace, empathy, and follow-up style.
 - Prompt context explicitly tells the downstream model how memory is allowed to influence the answer.
+- Prompt assembly now separates visible direct facts from policy-only memories, so style/profile/hidden memories do not leak raw evidence into the direct memory section.
+- v2 query now uses the intent-aware hybrid scorer before the use gate.
+- `allowed_use`, sensitivity, and event follow-up state now participate in the runtime use gate instead of being passive metadata only.
 
 Gap:
 
-- Query intent classification and retrieval planning exist as deterministic rules, but not yet as learned or embedding-backed retrieval.
-- Hybrid retrieval with embeddings is not implemented.
+- Hybrid retrieval has an executable deterministic embedding boundary, but still needs a production embedding provider and vector index.
 - Gate thresholds are hardcoded, not learned or user-configurable.
 - The system does not yet evaluate downstream answer quality.
 - There is no policy-conditioned answer generator yet.
@@ -134,9 +136,10 @@ be a general mechanism. Next skills should be:
 ### P2: Profile Inference Needs Richer Psychology And Explanation
 
 The system now has the first profile evidence ledger and accumulator. Repeated
-signals can produce reviewable inferred-profile candidates. The remaining gap is
-depth: dimensions are useful but narrow, and explanations are still structural
-rather than psychologically rich.
+signals can produce reviewable inferred-profile candidates, and contradictory
+signals can reduce sticky profile hypotheses. The remaining gap is depth:
+dimensions are useful but narrow, and explanations are still structural rather
+than psychologically rich.
 
 ```text
 profile dimension

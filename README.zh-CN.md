@@ -162,13 +162,13 @@ Phase 2 优化规格已纳入仓库：
 
 - `memory_system/models.py` 增加 `MemoryRecord`、`MemoryEvidence`、`MemoryOperation`、`EventMemoryState`、graph edge 等 Phase 2 模型。
 - 增加 `MemoryItem -> MemoryRecord` adapter，为后续 normalized storage 做准备。
-- `MemoryUseGate` 扩展到 Phase 2 的 7 个 action：`use_directly`、`style_only`、`follow_up`、`clarify`、`hidden_constraint`、`summarize_only`、`suppress`。
-- `ContextCompiler` 将上下文拆成 direct facts、style policy、event follow-up cues、hidden constraints、clarification prompts。
+- `MemoryUseGate` 扩展到 Phase 2 的 7 个 action：`use_directly`、`style_only`、`follow_up`、`clarify`、`hidden_constraint`、`summarize_only`、`suppress`，并把 `allowed_use` 与 sensitivity 作为运行时硬约束。
+- `ContextCompiler` 将上下文拆成 direct facts、style policy、event follow-up cues、hidden constraints、clarification prompts；`PromptContextBuilder` 只会把 gate 允许显式提及的 direct facts 渲染到原始记忆区。
 - `NormalizedSQLiteMemoryRepository` 增加 Phase 2 normalized `memory_records`、`memory_evidence`、`memory_audit_events`、`memory_review_queue`、`memory_user_settings`、`event_memory_states` 表、索引、CRUD、tombstone delete、operation application 和旧 `MemoryStore` 迁移路径。
 - `WeightedMemoryWriteEvaluatorV2`、`ContradictionDetector`、`MemoryOperationPlanner` 增加第一版确定性写入治理：加权评分、硬规则、重复处理、review routing 和 supersession planning。
 - `TurnPreprocessor`、`MemoryCommandDetector`、`SensitivityClassifier`、`RuleMemoryProposalExtractor` 增加第一版 Phase 2 proposal extraction pipeline，同时保留无网络依赖的 LLM extractor 边界。
 - `LLMProposalSchemaValidator`、`LLMMemoryProposalExtractor` 支持校验、修复并转换 LLM 输出为 `MemoryRecord` proposals，不允许原始模型输出直接写入记忆。
-- `ProfileEvidenceExtractor`、`ProfileAccumulator` 增加第一版长期画像 evidence ledger：重复行为信号会形成可 review 的 `inferred_profile` 候选，而不是单轮对话就下心理结论。
+- `ProfileEvidenceExtractor`、`ProfileAccumulator` 增加第一版长期画像 evidence ledger：重复行为信号会形成可 review 的 `inferred_profile` 候选，而不是单轮对话就下心理结论；反证和时间衰减会降低过度黏着的画像假设。
 - `CareerEventSkill`、`LearningEventSkill`、`LifeEventSkill` 增加第一版职业、备考、关系变化、搬家、入职事件状态 skill，用于进展识别和 follow-up 判断。
 - 新增 `/v2/users/{user_id}/turns/ingest`、`/v2/users/{user_id}/memory/query`、`/v2/users/{user_id}/prompt-context`，提供 Phase 2 API 形态；v2 ingest 会将 planned operations 落到 normalized SQLite，v2 query 会优先使用 normalized records。
 - `/v2/users/{user_id}/memory/audit` 暴露 normalized lifecycle audit events。
@@ -176,7 +176,7 @@ Phase 2 优化规格已纳入仓库：
 - `/v2/users/{user_id}/memory/settings`、`/v2/users/{user_id}/memory/{memory_id}/delete`、`/v2/users/{user_id}/memory/{memory_id}/correct`、`/v2/users/{user_id}/memory/forget-all`、`/v2/users/{user_id}/memory/events` 增加用户治理和事件状态 API。
 - `/v2/users/{user_id}/memory/audit/export` 支持导出 normalized records、settings、review items、event states 和 audit events，方便检查和迁移。
 - `/v2/users/{user_id}/memory/profile-evidence` 暴露 inferred profile hypotheses 背后的支持证据。
-- `QueryIntentClassifier`、`RetrievalPlanner`、`HybridMemoryScorer` 增加第一版进入 gate 前的 intent-aware 且可接 embedding provider 的 retrieval 边界。
+- `QueryIntentClassifier`、`RetrievalPlanner`、`HybridMemoryScorer` 增加第一版进入 gate 前的 intent-aware 且可接 embedding provider 的 retrieval 边界；v2 query 已接入该 scorer 后再进入记忆使用门控。
 - `evals/runner.py` 增加第一版 gate eval smoke suite。
 
 这还不是完整 Phase 2。真实 LLM provider 接入、真实 embedding-backed retrieval、更多 event skills、settings UI、batch review、migration CLI 和 privacy hardening 会作为后续里程碑继续实现。
@@ -515,9 +515,9 @@ data/adaptive_memory.sqlite3
 | 动态状态 | 已有 `static`、`semi_static`、`fluid` 和 registry defaults。 | 需要更细的 TTL、转移规则和状态历史总结。 |
 | 互斥规则 | 已通过 `exclusive_group` 和 `MemorySlotRegistry` 实现。 | 需要支持项目级 / 用户级 registry 配置。 |
 | 兴趣 | 已有长期兴趣和短期兴趣 slot。 | 需要频率统计、兴趣衰减和近期活跃度。 |
-| 画像 | 已有基础推理画像。 | 需要更心理学化的 trait model、证据累计和用户可见解释。 |
-| 记忆使用 | `MemoryUseGate` 已实现直接使用、风格使用、跟进和抑制。 | 需要 learned thresholds、用户级隐私设置和离线评估。 |
-| 检索 | 已有 keyword/rule retrieval 和 use gating。 | 需要 semantic retrieval、query intent classification 和 policy-aware ranking。 |
+| 画像 | 已有基础推理画像、证据累计、反证和衰减。 | 需要更心理学化的 trait model 和用户可见解释。 |
+| 记忆使用 | `MemoryUseGate` 已实现直接使用、风格使用、跟进、抑制，并执行 `allowed_use` / sensitivity 约束。 | 需要 learned thresholds、用户级隐私设置和离线评估。 |
+| 检索 | v2 已接入 intent-aware hybrid scorer，当前 embedding provider 是离线确定性 stub。 | 需要真实 embedding provider、vector index 和 policy-aware rerank。 |
 | 持久化 | 已有 JSON / SQLite。 | 需要 migration、加密、备份和多用户权限。 |
 
 ---
@@ -525,9 +525,9 @@ data/adaptive_memory.sqlite3
 ## 路线图
 
 1. 增加 career、learning、relationship、project 等领域事件 skills。
-2. 加入冷却期感知的事件跟进和 event-to-state 转换规则。
+2. 增加事件跟进写回、event-to-state 转换和更完整的事件解决规则。
 3. 将 `StructuredMemoryParser` 接入生产 LLM extraction。
-4. 在 `MemoryUseGate` 前加入 embedding semantic retrieval。
+4. 用真实 embedding provider 和 vector index 替换当前 deterministic retrieval stub。
 5. 增加按记忆类型和 dynamics 配置的衰减策略。
 6. 增加 learned gate thresholds 和离线个性化评估。
 7. 增加超出 exclusive group 的矛盾检测。

@@ -44,6 +44,9 @@ class MemoryItem:
     dynamics: StateDynamics = StateDynamics.NOT_APPLICABLE
     tags: list[str] = field(default_factory=list)
     last_updated: datetime | None = None
+    allowed_use: list[str] = field(default_factory=list)
+    sensitivity: str = "personal"
+    memory_id: str | None = None
 
     def is_active(self, now: datetime | None = None) -> bool:
         current = now or datetime.now(self.valid_from.tzinfo)
@@ -75,6 +78,9 @@ class MemoryItem:
             "dynamics": self.dynamics.value,
             "tags": self.tags,
             "last_updated": self.last_updated.isoformat() if self.last_updated else None,
+            "allowed_use": self.allowed_use,
+            "sensitivity": self.sensitivity,
+            "memory_id": self.memory_id,
         }
 
     @classmethod
@@ -98,6 +104,9 @@ class MemoryItem:
                 if payload.get("last_updated")
                 else None
             ),
+            allowed_use=list(payload.get("allowed_use", [])),
+            sensitivity=payload.get("sensitivity", "personal"),
+            memory_id=payload.get("memory_id"),
         )
 
 

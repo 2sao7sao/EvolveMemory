@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
 from math import sqrt
+import re
 from typing import Protocol
 
 from .models import MemoryLayer
@@ -71,7 +72,7 @@ class QueryIntentClassifier:
 class RetrievalPlanner:
     def plan(self, query: str, *, max_prompt_memories: int) -> RetrievalPlan:
         intent = QueryIntentClassifier().classify(query)
-        modes = ["normalized_sqlite", "keyword", "temporal", "recent"]
+        modes = ["normalized_sqlite", "hybrid", "keyword", "temporal", "recent"]
         include_layers: list[MemoryLayer] = []
         reasons = [f"intent={intent.name}"]
         if intent.name == "career_advice":
@@ -137,7 +138,7 @@ class DeterministicHashEmbeddingProvider:
         return [value / norm for value in vector]
 
     def _tokens(self, text: str) -> list[str]:
-        return [token for token in text.lower().replace("，", " ").replace("。", " ").split() if token]
+        return tokenize_text(text)
 
 
 @dataclass(frozen=True)
@@ -201,8 +202,8 @@ class HybridMemoryScorer:
         return HybridRetrievalScore(memory=memory, score=score, factors=factors)
 
     def _keyword_overlap(self, query: str, text: str) -> float:
-        query_tokens = set(query.lower().replace("，", " ").replace("。", " ").split())
-        text_tokens = set(text.lower().replace("，", " ").replace("。", " ").split())
+        query_tokens = set(tokenize_text(query))
+        text_tokens = set(tokenize_text(text))
         if not query_tokens or not text_tokens:
             return 0.0
         return len(query_tokens & text_tokens) / len(query_tokens)
@@ -230,3 +231,17 @@ class HybridMemoryScorer:
         if memory.memory_type.value == "profile":
             return MemoryLayer.INFERRED_PROFILE
         return MemoryLayer.SEMANTIC_FACT
+
+
+def tokenize_text(text: str) -> list[str]:
+    normalized = text.lower().replace("，", " ").replace("。", " ")
+    tokens = re.findall(r"[a-z0-9_]+|[\u4e00-\u9fff]+", normalized)
+    expanded: list[str] = []
+    for token in tokens:
+        expanded.append(token)
+        if re.fullmatch(r"[\u4e00-\u9fff]+", token):
+            for size in (2, 3, 4):
+                if len(token) < size:
+                    continue
+                expanded.extend(token[index : index + size] for index in range(len(token) - size + 1))
+    return [token for token in expanded if token]
