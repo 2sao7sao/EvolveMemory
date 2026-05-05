@@ -190,6 +190,9 @@ compatibility:
 - `TurnPreprocessor`, `MemoryCommandDetector`, `SensitivityClassifier`, and
   `RuleMemoryProposalExtractor` add the first Phase 2 proposal-extraction
   pipeline while keeping the LLM extractor boundary dependency-free.
+- `LLMProposalSchemaValidator` and `LLMMemoryProposalExtractor` now validate,
+  repair, and convert LLM output into `MemoryRecord` proposals without allowing
+  raw model output to write memory directly.
 - `ProfileEvidenceExtractor` and `ProfileAccumulator` add the first long-term
   profile evidence ledger: repeated behavioral signals become reviewable
   `inferred_profile` candidates instead of one-turn psychological conclusions.
@@ -214,13 +217,15 @@ compatibility:
   portability.
 - `/v2/users/{user_id}/memory/profile-evidence` exposes the supporting evidence
   behind inferred profile hypotheses.
-- `QueryIntentClassifier` and `RetrievalPlanner` add the first deterministic
-  intent-aware retrieval plan before the gate.
+- `QueryIntentClassifier`, `RetrievalPlanner`, and `HybridMemoryScorer` add the
+  first intent-aware and embedding-provider-ready retrieval boundary before the
+  gate.
 - `evals/runner.py` adds the first gate evaluation smoke suite.
 
-This is not the full Phase 2 scope yet. LLM extraction, embedding-backed hybrid
-retrieval, more event skills, settings UI, batch review, migration CLI, and
-privacy hardening are tracked as the next implementation milestones.
+This is not the full Phase 2 scope yet. Live LLM provider integration, real
+embedding-backed retrieval, more event skills, settings UI, batch review,
+migration CLI, and privacy hardening are tracked as the next implementation
+milestones.
 
 ---
 

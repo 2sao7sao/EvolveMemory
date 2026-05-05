@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any, Protocol
 
 from .engine import DialogueMemoryExtractor
-from .models import Authority, MemoryRecord, Sensitivity
+from .models import Authority, MemoryLayer, MemoryRecord, Sensitivity
 from .schema import MemoryItem
 
 
@@ -203,6 +203,173 @@ class LLMMemoryProposalExtractor:
             "instructions": [
                 "You are a memory proposal extractor, not a memory writer.",
                 "Do not write third-party facts as user facts.",
+                "Return candidate memories only; deterministic policy decides writes.",
+                "Every candidate must include evidence copied or paraphrased from the user turn.",
                 "Return JSON only.",
             ],
+            "output_schema": LLMProposalSchemaValidator.schema(),
         }
+
+    def parse_response_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        turn: PreprocessedTurn,
+        user_id: str,
+        session_id: str | None = None,
+    ) -> list[MemoryRecord]:
+        validated = LLMProposalSchemaValidator().repair_and_validate(payload)
+        return [
+            self._record_from_candidate(candidate, turn=turn, user_id=user_id, session_id=session_id)
+            for candidate in validated["candidate_memories"]
+        ]
+
+    def _record_from_candidate(
+        self,
+        candidate: dict[str, Any],
+        *,
+        turn: PreprocessedTurn,
+        user_id: str,
+        session_id: str | None,
+    ) -> MemoryRecord:
+        return MemoryRecord(
+            user_id=user_id,
+            session_id=session_id,
+            layer=MemoryLayer(candidate["layer"]),
+            key=candidate["key"],
+            value=candidate["value"],
+            normalized_value=candidate.get("normalized_value", candidate["value"]),
+            confidence=candidate["confidence"],
+            authority=Authority(candidate["authority"]),
+            sensitivity=Sensitivity(candidate["sensitivity"]),
+            source_turn_ids=[turn.turn_id],
+            source_text_hash=turn.text_hash,
+            valid_from=turn.timestamp,
+            valid_to=None,
+            observed_at=turn.timestamp,
+            exclusive_group=candidate.get("exclusive_group"),
+            coexistence_rule=candidate.get("coexistence_rule", "coexist"),
+            tags=list(candidate.get("tags", [])),
+            metadata={
+                "evidence": candidate["evidence"],
+                "reasoning": candidate.get("reasoning", ""),
+                "extractor_version": self.extractor_version,
+                "language": turn.language,
+                "memory_command": turn.memory_command.value if turn.memory_command else None,
+                "time_expressions": turn.time_expressions,
+            },
+        )
+
+
+class LLMProposalValidationError(ValueError):
+    pass
+
+
+class LLMProposalSchemaValidator:
+    REQUIRED_FIELDS = {
+        "layer",
+        "key",
+        "value",
+        "confidence",
+        "authority",
+        "sensitivity",
+        "evidence",
+    }
+
+    @classmethod
+    def schema(cls) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "required": ["candidate_memories"],
+            "properties": {
+                "candidate_memories": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": sorted(cls.REQUIRED_FIELDS),
+                        "properties": {
+                            "layer": {"enum": [item.value for item in MemoryLayer]},
+                            "key": {"type": "string"},
+                            "value": {},
+                            "normalized_value": {},
+                            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                            "authority": {"enum": [item.value for item in Authority]},
+                            "sensitivity": {"enum": [item.value for item in Sensitivity]},
+                            "evidence": {"type": "string"},
+                            "reasoning": {"type": "string"},
+                            "exclusive_group": {"type": ["string", "null"]},
+                            "coexistence_rule": {
+                                "enum": [
+                                    "coexist",
+                                    "mutually_exclusive",
+                                    "conditionally_exclusive",
+                                    "mergeable",
+                                ]
+                            },
+                            "tags": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                }
+            },
+        }
+
+    def repair_and_validate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise LLMProposalValidationError("LLM proposal payload must be an object.")
+        raw_candidates = payload.get("candidate_memories", payload.get("memories", []))
+        if not isinstance(raw_candidates, list):
+            raise LLMProposalValidationError("candidate_memories must be a list.")
+        candidates = [self._repair_candidate(candidate) for candidate in raw_candidates]
+        return {"candidate_memories": candidates}
+
+    def _repair_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(candidate, dict):
+            raise LLMProposalValidationError("Each candidate memory must be an object.")
+        repaired = dict(candidate)
+        if "type" in repaired and "layer" not in repaired:
+            repaired["layer"] = self._legacy_type_to_layer(str(repaired["type"]))
+        repaired.setdefault("authority", Authority.ASSISTANT_INFERRED.value)
+        repaired.setdefault("sensitivity", Sensitivity.PERSONAL.value)
+        repaired.setdefault("coexistence_rule", "coexist")
+        repaired.setdefault("tags", [])
+        missing = self.REQUIRED_FIELDS - repaired.keys()
+        if missing:
+            raise LLMProposalValidationError(f"candidate missing required fields: {sorted(missing)}")
+        repaired["confidence"] = self._confidence(repaired["confidence"])
+        self._ensure_enum(repaired["layer"], MemoryLayer, "layer")
+        self._ensure_enum(repaired["authority"], Authority, "authority")
+        self._ensure_enum(repaired["sensitivity"], Sensitivity, "sensitivity")
+        if not str(repaired["key"]).strip():
+            raise LLMProposalValidationError("candidate key cannot be empty.")
+        if not str(repaired["evidence"]).strip():
+            raise LLMProposalValidationError("candidate evidence cannot be empty.")
+        if repaired["coexistence_rule"] not in {
+            "coexist",
+            "mutually_exclusive",
+            "conditionally_exclusive",
+            "mergeable",
+        }:
+            repaired["coexistence_rule"] = "coexist"
+        repaired["key"] = str(repaired["key"]).strip()
+        repaired["tags"] = list(repaired.get("tags", []))
+        return repaired
+
+    def _confidence(self, value: object) -> float:
+        try:
+            return max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError) as exc:
+            raise LLMProposalValidationError("candidate confidence must be numeric.") from exc
+
+    def _ensure_enum(self, value: object, enum_cls: type[Enum], field_name: str) -> None:
+        try:
+            enum_cls(str(value))
+        except ValueError as exc:
+            raise LLMProposalValidationError(f"invalid {field_name}: {value}") from exc
+
+    def _legacy_type_to_layer(self, value: str) -> str:
+        return {
+            "event": MemoryLayer.EPISODIC_EVENT.value,
+            "state": MemoryLayer.SEMANTIC_FACT.value,
+            "preference": MemoryLayer.PREFERENCE.value,
+            "profile": MemoryLayer.INFERRED_PROFILE.value,
+        }.get(value, value)

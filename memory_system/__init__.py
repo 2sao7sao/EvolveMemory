@@ -12,6 +12,8 @@ from .context import CompiledMemoryContext, ContextCompiler
 from .events import CareerEventSkill, EventSkillRegistry, LearningEventSkill, LifeEventSkill
 from .extraction import (
     LLMMemoryProposalExtractor,
+    LLMProposalSchemaValidator,
+    LLMProposalValidationError,
     MemoryCommand,
     MemoryCommandDetector,
     PreprocessedTurn,
@@ -54,7 +56,15 @@ from .profiles import (
     ProfileHypothesis,
 )
 from .registry import MemorySlotRegistry, SlotDefinition
-from .retrieval import QueryIntent, QueryIntentClassifier, RetrievalPlan, RetrievalPlanner
+from .retrieval import (
+    DeterministicHashEmbeddingProvider,
+    HybridMemoryScorer,
+    HybridRetrievalScore,
+    QueryIntent,
+    QueryIntentClassifier,
+    RetrievalPlan,
+    RetrievalPlanner,
+)
 from .schema import (
     AuditAction,
     MemoryAuditEvent,
@@ -84,10 +94,15 @@ __all__ = [
     "ContradictionDetector",
     "CareerEventSkill",
     "DialogueMemoryExtractor",
+    "DeterministicHashEmbeddingProvider",
     "DiskSessionRepository",
     "EventMemoryState",
     "EventSkillRegistry",
     "FollowupPolicy",
+    "HybridMemoryScorer",
+    "HybridRetrievalScore",
+    "LLMProposalSchemaValidator",
+    "LLMProposalValidationError",
     "MemoryAuditEvent",
     "MemoryEvidence",
     "MemoryGateDecision",

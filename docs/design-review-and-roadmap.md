@@ -160,8 +160,8 @@ should cover:
 
 ## 3. Recommended Next Iteration Order
 
-1. Add embedding provider interface and hybrid retrieval.
-2. Add LLM proposal extractor interface with JSON validation and repair.
+1. Add live LLM provider integration around the validated proposal boundary.
+2. Replace deterministic hash embeddings with a real embedding provider.
 3. Add project and stricter relationship event skills.
 4. Add migration CLI from legacy session payloads to normalized records.
 5. Add sensitive field encryption and retention enforcement.

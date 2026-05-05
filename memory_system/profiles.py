@@ -69,6 +69,7 @@ class ProfileHypothesis:
     support_weight: float
     evidence_ids: list[UUID]
     rationale: str
+    supporting_quotes: list[str] = field(default_factory=list)
 
     def to_record(
         self,
@@ -101,6 +102,7 @@ class ProfileHypothesis:
                 "support_weight": round(self.support_weight, 3),
                 "evidence_ids": [str(item) for item in self.evidence_ids],
                 "rationale": self.rationale,
+                "supporting_quotes": list(self.supporting_quotes),
                 "profile_version": "evidence-accumulator-v1",
             },
         )
@@ -185,6 +187,7 @@ class ProfileAccumulator:
                         f"{dimension}={value} inferred from "
                         f"{len(items)} supporting evidence items"
                     ),
+                    supporting_quotes=[item.quote for item in items[:5]],
                 )
             )
         return sorted(hypotheses, key=lambda item: item.confidence, reverse=True)

@@ -14,6 +14,9 @@ from memory_system import (
     DiskSessionRepository,
     CareerEventSkill,
     EventSkillRegistry,
+    HybridMemoryScorer,
+    LLMMemoryProposalExtractor,
+    LLMProposalSchemaValidator,
     MemoryOperationPlanner,
     MemoryCommand,
     MemoryCommandDetector,
@@ -310,6 +313,38 @@ class MemorySystemTest(unittest.TestCase):
         self.assertEqual(by_key["current_emotional_state"].sensitivity.value, "sensitive")
         self.assertEqual(by_key["communication_style"].metadata["language"], "zh-CN")
         self.assertEqual(by_key["communication_style"].source_text_hash, turn.text_hash)
+
+    def test_llm_proposal_validator_repairs_legacy_payload(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        turn = TurnPreprocessor().preprocess(
+            text="我最近准备面试。",
+            timestamp=timestamp,
+            turn_id="turn_1",
+        )
+        payload = {
+            "memories": [
+                {
+                    "type": "event",
+                    "key": "life_event",
+                    "value": "prepare_interview",
+                    "confidence": 1.4,
+                    "evidence": "准备面试",
+                }
+            ]
+        }
+
+        validated = LLMProposalSchemaValidator().repair_and_validate(payload)
+        records = LLMMemoryProposalExtractor().parse_response_payload(
+            payload,
+            turn=turn,
+            user_id="user-1",
+            session_id="session-1",
+        )
+
+        self.assertEqual(validated["candidate_memories"][0]["layer"], "episodic_event")
+        self.assertEqual(validated["candidate_memories"][0]["confidence"], 1.0)
+        self.assertEqual(records[0].layer, MemoryLayer.EPISODIC_EVENT)
+        self.assertEqual(records[0].metadata["extractor_version"], "llm-proposal-v0")
 
     def test_career_event_skill_detects_and_updates_interview_event(self) -> None:
         timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
@@ -612,6 +647,25 @@ class MemorySystemTest(unittest.TestCase):
 
         self.assertTrue(accumulated)
         self.assertEqual(accumulated[0].dimension, "directness_preference_level")
+        self.assertTrue(accumulated[0].supporting_quotes)
+
+    def test_hybrid_memory_scorer_scores_keyword_embedding_and_layer_prior(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        memory = MemoryItem(
+            memory_type=MemoryType.EVENT,
+            key="life_event",
+            value="prepare_interview",
+            confidence=0.8,
+            source="turn_1",
+            evidence="准备面试",
+            valid_from=timestamp,
+        )
+        plan = RetrievalPlanner().plan("面试怎么准备？", max_prompt_memories=8)
+
+        scores = HybridMemoryScorer().score("面试怎么准备？", [memory], now=timestamp, plan=plan)
+
+        self.assertEqual(scores[0].memory.key, "life_event")
+        self.assertGreater(scores[0].factors["layer_prior"], 0.9)
 
     def test_write_policy_rejects_low_value_memory(self) -> None:
         memory = MemoryItem(
