@@ -22,10 +22,7 @@ class PromptContextBuilder:
         memory_gate: dict[str, object] | None = None,
         compiled_context: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        memory_lines = [
-            f"- {item.key}: {item.value} (confidence={item.confidence:.2f}, evidence={item.evidence})"
-            for item in relevant_memories
-        ]
+        memory_lines = self._visible_memory_lines(relevant_memories, memory_gate)
         response_rules = [
             f"tone={policy.tone}",
             f"detail_level={policy.detail_level}",
@@ -106,6 +103,32 @@ class PromptContextBuilder:
                 f"- {memory.get('key')}: action={item.get('action')}, layer={item.get('layer')}"
             )
         return "\n".join(lines) if lines else "- no gate decisions"
+
+    def _visible_memory_lines(
+        self,
+        relevant_memories: list[MemoryItem],
+        memory_gate: dict[str, object] | None,
+    ) -> list[str]:
+        if not memory_gate:
+            return [f"- {item.key}: {item.value}" for item in relevant_memories]
+        selected = memory_gate.get("selected", [])
+        if not isinstance(selected, list):
+            return []
+        lines: list[str] = []
+        for item in selected:
+            if not isinstance(item, dict):
+                continue
+            if item.get("action") != "use_directly":
+                continue
+            if item.get("prompt_visibility") != "visible":
+                continue
+            if item.get("safe_to_mention") is not True:
+                continue
+            memory = item.get("memory", {})
+            if not isinstance(memory, dict):
+                continue
+            lines.append(f"- {memory.get('key')}: {memory.get('value')}")
+        return lines
 
     def _compiled_sections(
         self,

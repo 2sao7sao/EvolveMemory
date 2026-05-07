@@ -195,7 +195,11 @@ class MemoryUseGate:
         return 0.66
 
     def _privacy(self, memory: MemoryItem, query: str) -> float:
-        if "sensitive" not in memory.tags:
+        if memory.sensitivity == "restricted":
+            return 0.95 if self._relevance(query, memory) >= 0.92 else 0.05
+        if "never_prompt" in set(memory.allowed_use):
+            return 0.0
+        if memory.sensitivity != "sensitive" and "sensitive" not in memory.tags:
             return 1.0
         if memory.key == "current_emotional_state" and self._has_any(query, self.WORK_TERMS):
             return 0.65
@@ -225,21 +229,53 @@ class MemoryUseGate:
         privacy = factors["privacy_safety"]
         if memory.valid_to is not None and memory.valid_to <= memory.valid_from:
             return MemoryUseAction.SUPPRESS
+        if "never_prompt" in set(memory.allowed_use):
+            return MemoryUseAction.SUPPRESS
         if privacy < 0.35 and relevance < 0.75:
             return MemoryUseAction.SUPPRESS
         if score < 0.48:
             return MemoryUseAction.SUPPRESS
         if layer == MemoryLayer.INFERRED_PROFILE:
-            return MemoryUseAction.STYLE_ONLY
+            return self._enforce_allowed_use(memory, MemoryUseAction.STYLE_ONLY)
         if memory.memory_type == MemoryType.PREFERENCE:
             if memory.key in {"followup_preference", "decision_preference"}:
-                return MemoryUseAction.HIDDEN_CONSTRAINT
-            return MemoryUseAction.STYLE_ONLY
+                return self._enforce_allowed_use(memory, MemoryUseAction.HIDDEN_CONSTRAINT)
+            return self._enforce_allowed_use(memory, MemoryUseAction.STYLE_ONLY)
         if "sensitive" in memory.tags and relevance < 0.78:
-            return MemoryUseAction.SUMMARIZE_ONLY
+            return self._enforce_allowed_use(memory, MemoryUseAction.SUMMARIZE_ONLY)
         if layer == MemoryLayer.EPISODIC_EVENT and self._event_needs_progress(memory):
-            return MemoryUseAction.FOLLOW_UP
-        return MemoryUseAction.USE_DIRECTLY
+            return self._enforce_allowed_use(memory, MemoryUseAction.FOLLOW_UP)
+        return self._enforce_allowed_use(memory, MemoryUseAction.USE_DIRECTLY)
+
+    def _enforce_allowed_use(
+        self,
+        memory: MemoryItem,
+        action: MemoryUseAction,
+    ) -> MemoryUseAction:
+        allowed = set(memory.allowed_use)
+        if not allowed:
+            return action
+        if "never_prompt" in allowed:
+            return MemoryUseAction.SUPPRESS
+        if action == MemoryUseAction.USE_DIRECTLY:
+            if "direct" in allowed:
+                return action
+            if "style" in allowed:
+                return MemoryUseAction.STYLE_ONLY
+            return MemoryUseAction.SUPPRESS
+        if action == MemoryUseAction.FOLLOW_UP:
+            if "follow_up" in allowed and "event_followup_suppressed" not in memory.tags:
+                return action
+            return MemoryUseAction.SUPPRESS
+        if action == MemoryUseAction.HIDDEN_CONSTRAINT:
+            if "hidden_constraint" in allowed:
+                return action
+            if "style" in allowed:
+                return MemoryUseAction.STYLE_ONLY
+            return MemoryUseAction.SUPPRESS
+        if action in {MemoryUseAction.STYLE_ONLY, MemoryUseAction.SUMMARIZE_ONLY}:
+            return action if "style" in allowed or "analytics" in allowed else MemoryUseAction.SUPPRESS
+        return action
 
     def _visibility(
         self,
@@ -276,7 +312,11 @@ class MemoryUseGate:
         return rationale
 
     def _event_needs_progress(self, memory: MemoryItem) -> bool:
-        return memory.memory_type == MemoryType.EVENT and str(memory.value) in self.EVENT_PROGRESS_VALUES
+        return (
+            memory.memory_type == MemoryType.EVENT
+            and str(memory.value) in self.EVENT_PROGRESS_VALUES
+            and "event_followup_suppressed" not in memory.tags
+        )
 
     def _has_any(self, text: str, terms: tuple[str, ...]) -> bool:
         return any(term in text for term in terms)

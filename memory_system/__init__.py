@@ -9,6 +9,18 @@ from .engine import (
     ResponsePolicyEngine,
 )
 from .context import CompiledMemoryContext, ContextCompiler
+from .events import CareerEventSkill, EventSkillRegistry, LearningEventSkill, LifeEventSkill
+from .extraction import (
+    LLMMemoryProposalExtractor,
+    LLMProposalSchemaValidator,
+    LLMProposalValidationError,
+    MemoryCommand,
+    MemoryCommandDetector,
+    PreprocessedTurn,
+    RuleMemoryProposalExtractor,
+    SensitivityClassifier,
+    TurnPreprocessor,
+)
 from .gating import (
     MemoryGateDecision,
     MemoryGateResult,
@@ -30,9 +42,29 @@ from .models import (
     PromptVisibility,
     Sensitivity,
 )
-from .persistence import DiskSessionRepository, SQLiteSessionRepository, SessionRepository
+from .persistence import (
+    DiskSessionRepository,
+    NormalizedSQLiteMemoryRepository,
+    SQLiteSessionRepository,
+    SessionRepository,
+)
 from .prompting import PromptContextBuilder
+from .profiles import (
+    ProfileAccumulator,
+    ProfileEvidence,
+    ProfileEvidenceExtractor,
+    ProfileHypothesis,
+)
 from .registry import MemorySlotRegistry, SlotDefinition
+from .retrieval import (
+    DeterministicHashEmbeddingProvider,
+    HybridMemoryScorer,
+    HybridRetrievalScore,
+    QueryIntent,
+    QueryIntentClassifier,
+    RetrievalPlan,
+    RetrievalPlanner,
+)
 from .schema import (
     AuditAction,
     MemoryAuditEvent,
@@ -44,6 +76,13 @@ from .schema import (
 )
 from .service import SessionMemoryRuntime
 from .structured import StructuredMemoryParser, memory_extraction_schema
+from .writing import (
+    Contradiction,
+    ContradictionDetector,
+    MemoryOperationPlanner,
+    WeightedMemoryWriteEvaluatorV2,
+    WritePolicyContext,
+)
 
 __all__ = [
     "AuditAction",
@@ -51,10 +90,19 @@ __all__ = [
     "Authority",
     "CompiledMemoryContext",
     "ContextCompiler",
+    "Contradiction",
+    "ContradictionDetector",
+    "CareerEventSkill",
     "DialogueMemoryExtractor",
+    "DeterministicHashEmbeddingProvider",
     "DiskSessionRepository",
     "EventMemoryState",
+    "EventSkillRegistry",
     "FollowupPolicy",
+    "HybridMemoryScorer",
+    "HybridRetrievalScore",
+    "LLMProposalSchemaValidator",
+    "LLMProposalValidationError",
     "MemoryAuditEvent",
     "MemoryEvidence",
     "MemoryGateDecision",
@@ -64,19 +112,34 @@ __all__ = [
     "MemoryLayer",
     "MemoryOperation",
     "MemoryOperationType",
+    "MemoryOperationPlanner",
     "MemoryRecord",
     "MemoryStatus",
+    "MemoryCommand",
+    "MemoryCommandDetector",
     "MemoryStore",
     "MemoryType",
     "MemoryUseAction",
     "MemoryUseGate",
     "MemoryWriteEvaluator",
+    "NormalizedSQLiteMemoryRepository",
     "ProfileInferencer",
+    "ProfileAccumulator",
+    "ProfileEvidence",
+    "ProfileEvidenceExtractor",
+    "ProfileHypothesis",
+    "PreprocessedTurn",
     "PromptContextBuilder",
     "PromptVisibility",
     "QueryMemoryRetriever",
+    "QueryIntent",
+    "QueryIntentClassifier",
+    "RetrievalPlan",
+    "RetrievalPlanner",
     "ResponsePolicy",
     "ResponsePolicyEngine",
+    "RuleMemoryProposalExtractor",
+    "SensitivityClassifier",
     "SessionMemoryRuntime",
     "SessionRepository",
     "SQLiteSessionRepository",
@@ -84,7 +147,13 @@ __all__ = [
     "StateDynamics",
     "Sensitivity",
     "StructuredMemoryParser",
+    "TurnPreprocessor",
+    "LLMMemoryProposalExtractor",
+    "LearningEventSkill",
+    "LifeEventSkill",
+    "WeightedMemoryWriteEvaluatorV2",
     "WriteDecision",
+    "WritePolicyContext",
     "memory_extraction_schema",
     "MemorySlotRegistry",
 ]

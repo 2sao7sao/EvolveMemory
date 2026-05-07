@@ -95,6 +95,10 @@ class MemoryRecord(BaseModel):
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    def model_post_init(self, __context: Any) -> None:
+        if not self.allowed_use:
+            self.allowed_use = default_allowed_use(self.layer, self.sensitivity)
+
     @classmethod
     def from_memory_item(
         cls,
@@ -105,8 +109,17 @@ class MemoryRecord(BaseModel):
         session_id: str | None = None,
     ) -> "MemoryRecord":
         layer = memory_item_layer(item)
-        sensitivity = Sensitivity.SENSITIVE if "sensitive" in item.tags else Sensitivity.PERSONAL
+        sensitivity = (
+            Sensitivity.SENSITIVE
+            if "sensitive" in item.tags
+            else Sensitivity(item.sensitivity or Sensitivity.PERSONAL.value)
+        )
         authority = Authority.USER_EXPLICIT if item.confirmed_by_user else Authority.ASSISTANT_INFERRED
+        allowed_use = (
+            [AllowedUse(value) for value in item.allowed_use]
+            if item.allowed_use
+            else default_allowed_use(layer, sensitivity)
+        )
         return cls(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -118,7 +131,7 @@ class MemoryRecord(BaseModel):
             confidence=item.confidence,
             authority=authority,
             sensitivity=sensitivity,
-            allowed_use=default_allowed_use(layer, sensitivity),
+            allowed_use=allowed_use,
             source_turn_ids=[item.source] if item.source else [],
             valid_from=item.valid_from,
             valid_to=item.valid_to,

@@ -848,6 +848,21 @@ class QueryMemoryRetriever:
             "pace_preference": {"快一点", "效率", "节奏"},
         }
         self.always_include_types = {MemoryType.PREFERENCE, MemoryType.PROFILE}
+        self.behavior_policy_cues = {
+            "怎么回答",
+            "回答",
+            "说法",
+            "沟通",
+            "建议",
+            "推荐",
+            "怎么做",
+            "面试",
+            "求职",
+            "工作",
+            "焦虑",
+            "压力",
+            "情绪",
+        }
 
     def retrieve(
         self,
@@ -867,7 +882,9 @@ class QueryMemoryRetriever:
     def _score(self, query: str, memory: MemoryItem) -> float:
         score = 0.0
         if memory.memory_type in self.always_include_types:
-            score += 1.5
+            if not self._query_allows_behavior_policy(query):
+                return 0.0
+            score += 1.2
         keywords = self.keyword_rules.get(memory.key, set())
         for token in keywords:
             if token in query:
@@ -883,8 +900,12 @@ class QueryMemoryRetriever:
                 score += 0.4
         if memory.memory_type == MemoryType.EVENT:
             score += 0.2
-        score += memory.confidence * 0.5
+        if score > 0:
+            score += memory.confidence * 0.5
         return score
+
+    def _query_allows_behavior_policy(self, query: str) -> bool:
+        return any(token in query for token in self.behavior_policy_cues)
 
 
 def pretty_memories(memories: list[MemoryItem]) -> str:
