@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="650" viewBox="0 0 1180 650" role="img" aria-label="EvolveMemory memory gate replay screenshot">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#10243a"/>
+      <stop offset="100%" stop-color="#173b40"/>
+    </linearGradient>
+    <style>
+      .title{font:800 22px 'Avenir Next','Trebuchet MS',sans-serif;fill:#e7f7ff}
+      .label{font:800 15px 'Avenir Next','Trebuchet MS',sans-serif;fill:#9fd8e9;text-transform:uppercase}
+      .mono{font:500 17px 'SFMono-Regular','Menlo','Consolas',monospace;fill:#eefbff}
+      .muted{fill:#a9c9d2}
+      .ok{fill:#9af0c4}
+      .warn{fill:#ffd58a}
+      .block{fill:#ff9e8f}
+    </style>
+  </defs>
+  <rect width="1180" height="650" rx="34" fill="#eef6f6"/>
+  <rect x="42" y="42" width="1096" height="566" rx="24" fill="url(#bg)" stroke="#9dcbd2"/>
+  <text x="76" y="88" class="title">EvolveMemory replay: remember, adapt, and stay silent</text>
+  <text x="76" y="136" class="label">User turns</text>
+  <text x="76" y="170" class="mono">1. 我最近准备面试，有点焦虑。</text>
+  <text x="76" y="202" class="mono">2. 回答直接一点，先给结论。</text>
+  <text x="76" y="258" class="label">Query A: 面试怎么准备？</text>
+  <text x="96" y="296" class="mono ok">life_event -> follow_up -> safe to mention</text>
+  <text x="96" y="328" class="mono ok">communication_style -> style_only -> do not expose fact</text>
+  <text x="96" y="360" class="mono warn">current_emotional_state -> summarize_only -> policy-only</text>
+  <text x="76" y="426" class="label">Query B: 今天只帮我 review Python 代码，不用提面试。</text>
+  <text x="96" y="464" class="mono block">life_event -> suppress</text>
+  <text x="96" y="496" class="mono ok">communication_style -> style_only</text>
+  <text x="96" y="528" class="mono muted">The assistant can remain direct without awkwardly mentioning the interview.</text>
+  <text x="76" y="588" class="mono muted">Core distinction: retrieval is not permission. Memory use must pass the gate.</text>
+</svg>

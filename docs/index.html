@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EvolveMemory | Adaptive memory runtime</title>
+    <style>
+      :root {
+        --bg: #edf6f6;
+        --ink: #132638;
+        --muted: #5d7480;
+        --panel: #ffffff;
+        --line: #cbdde0;
+        --blue: #1b6f8f;
+        --rose: #bd5b63;
+        --green: #167b63;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 16% 10%, #d9eef5 0, transparent 24%),
+          radial-gradient(circle at 88% 0%, #ffe1dd 0, transparent 26%),
+          linear-gradient(135deg, #eef8f8, #f8fbfb 55%, #fff3ef);
+        font: 16px/1.56 "Avenir Next", "Trebuchet MS", Verdana, sans-serif;
+      }
+      main { max-width: 1180px; margin: 0 auto; padding: 44px 22px 68px; }
+      header { display: grid; grid-template-columns: minmax(0,1.1fr) minmax(330px,0.9fr); gap: 30px; align-items: center; min-height: 560px; }
+      h1 { margin: 0; font: 900 clamp(48px, 8vw, 104px)/0.88 Georgia, "Times New Roman", serif; letter-spacing: -0.06em; }
+      h2 { margin: 0 0 14px; font: 800 28px/1.1 Georgia, "Times New Roman", serif; }
+      p { margin: 0 0 14px; }
+      code { font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+      .eyebrow { color: var(--rose); font-weight: 900; letter-spacing: 0.12em; text-transform: uppercase; }
+      .subtitle { max-width: 760px; margin-top: 24px; color: var(--muted); font-size: 21px; }
+      .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+      .button { display: inline-flex; border: 1px solid var(--blue); border-radius: 999px; padding: 12px 17px; color: #fff; background: var(--blue); text-decoration: none; font-weight: 800; }
+      .button.secondary { color: var(--blue); background: rgba(255,255,255,0.68); }
+      .hero-card, .panel, .metric { border: 1px solid var(--line); background: rgba(255,255,255,0.86); border-radius: 26px; box-shadow: 0 22px 60px rgba(19,38,56,0.09); }
+      .hero-card { padding: 24px; }
+      .gate { display: grid; gap: 12px; }
+      .gate div { padding: 14px 16px; border: 1px solid var(--line); border-radius: 16px; background: #fafdff; font-weight: 800; }
+      .grid { display: grid; gap: 18px; }
+      .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .section { padding-top: 28px; }
+      .panel { padding: 24px; }
+      .metrics { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; }
+      .metric { padding: 18px; }
+      .metric span { display: block; color: var(--muted); font-size: 12px; font-weight: 900; text-transform: uppercase; }
+      .metric strong { display: block; margin-top: 8px; font-size: 26px; }
+      .screenshot { width: 100%; border-radius: 24px; border: 1px solid var(--line); background: #fff; }
+      table { width: 100%; border-collapse: collapse; }
+      td, th { padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+      th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+      @media (max-width: 880px) {
+        header, .grid.two, .metrics { grid-template-columns: 1fr; }
+        header { min-height: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <section>
+          <div class="eyebrow">Adaptive Memory Runtime</div>
+          <h1>EvolveMemory</h1>
+          <p class="subtitle">
+            Memory should make AI feel more natural, not more intrusive. EvolveMemory
+            decides what to remember, what to retrieve, how to use it, and when to stay silent.
+          </p>
+          <div class="actions">
+            <a class="button" href="https://github.com/2sao7sao/EvolveMemory">GitHub</a>
+            <a class="button secondary" href="https://github.com/2sao7sao/EvolveMemory/blob/main/examples/adaptive_memory_replay.md">Read replay</a>
+            <a class="button secondary" href="https://github.com/2sao7sao/EvolveMemory/blob/main/CONTRIBUTING.md">Contribute</a>
+          </div>
+        </section>
+        <aside class="hero-card">
+          <h2>Retrieval is not permission.</h2>
+          <div class="gate">
+            <div>Extract memory proposals</div>
+            <div>Govern writes and corrections</div>
+            <div>Retrieve relevant candidates</div>
+            <div>Gate direct/style/follow-up/suppress use</div>
+            <div>Compile response policy without awkward recall</div>
+          </div>
+        </aside>
+      </header>
+
+      <section class="metrics">
+        <div class="metric"><span>Tests</span><strong>52 passed</strong></div>
+        <div class="metric"><span>Gate eval</span><strong>8 / 8</strong></div>
+        <div class="metric"><span>Core risk</span><strong>Creepy recall</strong></div>
+        <div class="metric"><span>Best fit</span><strong>AI companion</strong></div>
+      </section>
+
+      <section class="section grid two">
+        <div class="panel">
+          <h2>What makes it different?</h2>
+          <p>EvolveMemory does not just inject retrieved facts into prompts. It turns memory into a control layer: direct use, style-only, follow-up, summarize-only, hidden constraint, clarify, or suppress.</p>
+        </div>
+        <div class="panel">
+          <h2>Run the replay</h2>
+          <p>The replay shows the same stored memory used in one query and suppressed in another because the user explicitly says not to mention it.</p>
+          <code>python examples/replay_adaptive_memory.py</code>
+        </div>
+      </section>
+
+      <section class="section">
+        <img class="screenshot" src="./assets/evolvememory-gate-replay.svg" alt="EvolveMemory gate replay screenshot" />
+      </section>
+
+      <section class="section panel">
+        <h2>Metrics that matter</h2>
+        <table>
+          <thead><tr><th>Metric</th><th>Question</th></tr></thead>
+          <tbody>
+            <tr><td>write precision</td><td>Was the memory worth saving?</td></tr>
+            <tr><td>use appropriateness</td><td>Was the memory safe and relevant for this turn?</td></tr>
+            <tr><td>creepy recall rate</td><td>Did the assistant mention something it should not mention?</td></tr>
+            <tr><td>style adaptation</td><td>Did the answer adapt without exposing private facts?</td></tr>
+            <tr><td>correction success</td><td>Did user corrections retire stale or unwanted memories?</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>

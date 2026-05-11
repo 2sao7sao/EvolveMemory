@@ -3,6 +3,7 @@
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/README-English-0f766e" alt="English README"></a>
   <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-b91c1c" alt="Chinese README"></a>
+  <a href="https://2sao7sao.github.io/EvolveMemory/"><img src="https://img.shields.io/badge/product-page-1b6f8f" alt="Product page"></a>
   <a href="./CONTRIBUTING.md"><img src="https://img.shields.io/badge/contributing-guide-111827" alt="Contributing guide"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-2563eb" alt="Python 3.11+">
