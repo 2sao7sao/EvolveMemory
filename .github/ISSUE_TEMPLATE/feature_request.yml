@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a memory behavior, eval, integration, or product improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What conversation or agent memory behavior does this improve?
+    validations:
+      required: true
+  - type: textarea
+    id: desired_behavior
+    attributes:
+      label: Desired behavior
+      description: Include an example turn, query, expected gate action, and response policy if possible.
+    validations:
+      required: true
+  - type: dropdown
+    id: contribution_type
+    attributes:
+      label: Contribution type
+      options:
+        - eval case
+        - gate policy
+        - write policy
+        - demo
+        - integration
+        - documentation
+        - privacy control
+    validations:
+      required: true

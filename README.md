@@ -3,6 +3,7 @@
 <p align="center">
   <a href="./README.md"><img src="https://img.shields.io/badge/README-English-0f766e" alt="English README"></a>
   <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-b91c1c" alt="Chinese README"></a>
+  <a href="./CONTRIBUTING.md"><img src="https://img.shields.io/badge/contributing-guide-111827" alt="Contributing guide"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-2563eb" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/status-adaptive%20memory%20runtime-f59e0b" alt="Project status">
@@ -130,6 +131,12 @@ python -m evals.runner --suite gate_eval
 Read the adaptive replay:
 
 - [Adaptive memory replay](examples/adaptive_memory_replay.md)
+
+Run the replay:
+
+```bash
+python examples/replay_adaptive_memory.py
+```
 
 Start the API:
 

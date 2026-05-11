@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a reproducible EvolveMemory problem.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What broke, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Include commands, turns, query, and gate output when possible.
+      value: |
+        ```bash
+        python -m pytest -q
+        python -m evals.runner --suite gate_eval
+        ```
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - extraction
+        - write policy
+        - retrieval
+        - use gate
+        - response policy
+        - correction/audit
+        - API
+        - documentation
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy note
+      description: Do not paste real user data. Use synthetic examples.
