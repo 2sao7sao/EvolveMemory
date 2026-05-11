@@ -1,229 +1,193 @@
 <img src="assets/adaptive-memory-engine-hero.png" alt="EvolveMemory banner" width="100%" />
 
 <p align="center">
-  <a href="./README.md"><img src="https://img.shields.io/badge/README-English-0f766e" alt="English README"></a>
-  <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/README-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-b91c1c" alt="中文 README"></a>
-  <a href="https://2sao7sao.github.io/EvolveMemory/"><img src="https://img.shields.io/badge/product-page-1b6f8f" alt="产品首页"></a>
-  <a href="./CONTRIBUTING.md"><img src="https://img.shields.io/badge/contributing-guide-111827" alt="贡献指南"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/python-3.11%2B-2563eb" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/status-adaptive%20memory%20runtime-f59e0b" alt="Project status">
+  <a href="./README.md">English</a>
+  ·
+  <a href="https://2sao7sao.github.io/EvolveMemory/">产品首页</a>
+  ·
+  <a href="./examples/adaptive_memory_replay.md">Replay</a>
+  ·
+  <a href="./CONTRIBUTING.md">贡献指南</a>
 </p>
 
-# EvolveMemory
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.11%2B-2563eb" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/tests-52%20passed-1b6f8f" alt="52 tests passed">
+  <img src="https://img.shields.io/badge/gate_eval-8%2F8-167b63" alt="Gate eval 8/8">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
+</p>
 
-**EvolveMemory 是一个面向对话 AI 与 Agent 的自适应记忆运行时。**
+# 知道什么时候闭嘴的记忆系统
 
-它判断什么应该被记住、什么应该被忽略、哪些记忆和当前任务相关，以及这些
-记忆应该如何影响下一次回答。项目面向真实 Agent 产品：记忆必须结构化、
-可解释、可纠错、可评审、可审计，并且在不该使用时保持沉默。
+**EvolveMemory 是一个面向对话 AI 和 Agent 的自适应记忆运行时。**
 
-```text
-User turn -> Proposals -> Write policy -> Store -> Retrieve -> Use gate -> Response policy
-```
+很多 memory 系统只是在“多存一点、多塞一点”。结果是 prompt 变长、用户画像变脏、
+隐私风险增加，而且助手会在不合适的时候突然提起旧事，显得刻意又尴尬。
 
-## 为什么需要 EvolveMemory
+EvolveMemory 把记忆当成控制系统：
 
-很多记忆系统过度关注“存储”：
+> 记住重要信息，检索相关信息，只在合适的时候使用。
 
-- 保存太多对话噪声。
-- 检索到了事实，却没有判断这个事实是否应该影响回答。
-- 把稳定画像、短期状态、偏好和事件混在同一个桶里。
-- 缺少明确的纠错、退休、评审和审计路径。
-- 让 prompt 变长，但没有让行为更可靠。
+![EvolveMemory gate replay](docs/assets/evolvememory-gate-replay.svg)
 
-EvolveMemory 把记忆视为控制系统。一个记忆只有在正确时刻改变模型行为，并在
-无关、敏感、过期或低置信度时保持沉默，才真正有价值。
-
-## 产品原则
-
-目标不是让助手不断强调“我记得你”，而是让记忆自然改善下一次交互，同时避免
-刻意、尴尬或无关的提及。
+## 30 秒理解
 
 ```text
-记住重要信息 -> 判断能否使用 -> 调整回答方式 -> 无关时保持沉默
+User turn -> Memory proposal -> Write policy -> Store -> Retrieve -> Use gate -> Response policy
 ```
 
-## 核心设计
+核心区别很简单：
 
-| 层级 | 做什么 | 产品价值 |
-| --- | --- | --- |
-| Proposal extraction | 将对话或结构化模型输出转成经过校验的 memory proposals。 | 避免原始模型输出直接写入记忆。 |
-| Write governance | 对候选记忆评分，检测重复和冲突，并规划 memory operations。 | 降低噪声、冲突和低置信度写入。 |
-| Normalized storage | 在 SQLite 中保存 records、evidence、audit events、review queue、settings 和 event states。 | 让记忆可检查、可迁移、可治理。 |
-| Retrieval planning | 判断 query intent，并在 gate 前对候选记忆打分。 | 在策略执行前控制上下文范围。 |
-| Memory use gate | 将记忆分类为 direct use、style-only、follow-up、summarize-only、clarify、hidden constraint 或 suppress。 | 区分“检索到”和“安全且有用”。 |
-| Response policy | 将 gated memory 转成回答风格、结构、详细度、同理心、节奏和决策模式。 | 不把所有记忆塞进 prompt，也能改变模型行为。 |
-| Event skills | 跟踪职业、学习、关系变化、搬家和 onboarding 进展。 | 把持续变化的用户事件转成受控 follow-up 行为。 |
-| Review and audit | 支持纠错、删除、forget-all、review queue approval 和 export。 | 让记忆可恢复、可治理、可检查。 |
+| 普通 memory layer | EvolveMemory |
+| --- | --- |
+| 保存事实 | 先判断这件事是否值得保存 |
+| 检索记忆 | 再判断检索到的记忆能不能用 |
+| 把记忆塞进 prompt | 区分 direct、style-only、follow-up、summarize-only、hidden constraint、suppress |
+| 让 prompt 更长 | 让行为更自然、更克制、更可控 |
+| 纠错路径弱 | 支持 correction、delete、review queue、forget-all、audit export |
 
-## 架构
-
-<img src="assets/architecture.svg" alt="EvolveMemory architecture" width="100%" />
-
-```mermaid
-flowchart TD
-    A["Dialogue turn or structured payload"] --> B["Proposal extraction"]
-    B --> C["Schema validation and repair"]
-    C --> D["Write evaluator and operation planner"]
-    D -->|write / merge / supersede| E["Normalized SQLite repository"]
-    D -->|review required| F["Review queue"]
-    D -->|reject| G["Audit: reject"]
-    E --> H["Profile evidence accumulator"]
-    E --> I["Event skills"]
-    E --> J["Retrieval planner and scorer"]
-    J --> K["MemoryUseGate"]
-    K --> L["ContextCompiler"]
-    L --> M["ResponsePolicyEngine"]
-    M --> N["PromptContextBuilder"]
-    N --> O["Model-ready prompt context"]
-    E --> P["Correction / delete / forget-all APIs"]
-    P --> Q["Audit and export"]
-```
-
-## 当前可复现指标
-
-本地最后验证时间：**2026-05-07**。
-
-| 信号 | 当前结果 | 命令 |
-| --- | ---: | --- |
-| Runtime 与 API 测试 | `52 / 52 passed` | `python -m unittest discover -s tests -p "test_*.py"` |
-| Pytest 兼容性 | `52 / 52 passed` | `python -m pytest -q` |
-| Gate action eval | `8 / 8 correct` | `python -m evals.runner --suite gate_eval` |
-| Gate action accuracy | `1.0000` | `python -m evals.runner --suite gate_eval` |
-
-当前 eval suite 包含三个种子场景：面试准备相关记忆应该触发 follow-up 和
-style policy；与代码任务无关的敏感事实应该被 suppress；用户明确说“不用提”
-某个事件时，应抑制该事件但保留风格偏好。这是回归种子，不是大规模 benchmark。
-它的价值在于验证一个核心产品判断：检索到记忆不等于允许使用记忆。
-
-测试覆盖 legacy runtime 兼容、normalized SQLite storage、write-governance
-operations、review queue、sensitivity handling、event skills、profile
-evidence accumulation、retrieval planning、memory-use gating、prompt-context
-assembly、correction/deletion/forget-all APIs、audit export 和 v2 ingest/query
-contracts。
-
-## 快速开始
+## 先跑 Replay
 
 ```bash
 git clone https://github.com/2sao7sao/EvolveMemory.git
 cd EvolveMemory
 python -m pip install -r requirements.txt
-```
-
-运行 demo：
-
-```bash
-python demo.py
-```
-
-运行测试和 eval：
-
-```bash
-python -m unittest discover -s tests -p "test_*.py"
-python -m evals.runner --suite gate_eval
-```
-
-查看自适应记忆 replay：
-
-- [Adaptive memory replay](examples/adaptive_memory_replay.md)
-
-运行 replay：
-
-```bash
 python examples/replay_adaptive_memory.py
 ```
 
-启动 API：
+Replay 展示核心产品行为：
+
+| Query | 记忆行为 |
+| --- | --- |
+| “面试怎么准备？” | 面试事件可作为 follow-up；回答风格偏好会影响输出。 |
+| “今天只帮我 review Python 代码，不用提面试。” | 面试事件被 suppress；但“先给结论”的风格仍可保留。 |
+
+这才是重点：记忆可以让助手更懂你，但不应该让助手显得冒犯或刻意。
+
+## 为什么需要它
+
+好的 AI 记忆不只是数据库问题，而是产品行为问题。
+
+| 失败模式 | 影响 | EvolveMemory 的处理 |
+| --- | --- | --- |
+| 保存太多对话残渣 | 记忆变脏、成本变高 | write governance、去重、冲突处理 |
+| 提起无关隐私事实 | 用户体验变 creepy | memory use gate、safe-to-mention policy |
+| 混淆偏好、事件、画像、状态 | prompt context 混乱 | 分层 memory model |
+| 用户纠正后仍沿用旧假设 | 信任崩掉 | correction、delete、forget-all、audit |
+| 检索到就注入 prompt | 长 prompt 不等于更聪明 | response policy 只编译真正有用的信息 |
+
+## 你得到什么
+
+| 层 | 作用 |
+| --- | --- |
+| Proposal extraction | 从对话或结构化模型输出中提取 memory candidates。 |
+| Write governance | 接受、拒绝、合并、替换，或送入 review queue。 |
+| Normalized storage | 存储 records、evidence、audit events、review queue、settings、event states。 |
+| Retrieval planning | 在策略执行前对候选记忆打分。 |
+| Memory use gate | 决定 direct use、style-only、follow-up、summarize-only、hidden constraint、clarify、suppress。 |
+| Response policy | 把 gated memory 转为语气、结构、详细度、同理心和决策模式。 |
+| Review and audit | 支持 correction、deletion、forget-all、review queue、export。 |
+
+## 可信信号
+
+本地最近验证：
+
+| 信号 | 结果 | 命令 |
+| --- | ---: | --- |
+| Runtime + API tests | `52 / 52 passed` | `python -m pytest -q` |
+| Gate eval | `8 / 8 correct` | `python -m evals.runner --suite gate_eval` |
+| Replay demo | `PASS` | `python examples/replay_adaptive_memory.py` |
+
+当前 eval 是 regression seed，不是大规模 benchmark。它验证的是产品定义级判断：
+检索到记忆，不等于允许使用记忆。
+
+## 常用命令
 
 ```bash
+# 默认抽取 demo
+python demo.py
+
+# 运行 memory gate eval
+python -m evals.runner --suite gate_eval
+
+# 启动 API
 uvicorn app:app --reload
-```
 
-使用 SQLite 持久化：
-
-```bash
+# 使用 SQLite 持久化
 AME_STORAGE_BACKEND=sqlite uvicorn app:app --reload
 ```
 
-## API
+## API 形态
 
-| Endpoint | 用途 |
+| Endpoint | 作用 |
 | --- | --- |
-| `GET /health` | 检查服务状态和存储后端。 |
-| `GET /memory-slots` | 查看声明式 memory slot 规则。 |
-| `POST /sessions/{session_id}/ingest` | 通过 legacy-compatible runtime 摄取一个用户 turn。 |
-| `POST /sessions/{session_id}/query` | 检索、门控并编译当前 query 的记忆上下文。 |
-| `POST /sessions/{session_id}/prompt-context` | 生成 model-ready prompt context。 |
-| `POST /sessions/{session_id}/memories/correct` | 纠正记忆，并退休冲突的 active state。 |
-| `GET /sessions/{session_id}/audit` | 查看 legacy lifecycle events。 |
-| `POST /v2/users/{user_id}/turns/ingest` | 将 turn 摄取到 Phase 2 normalized runtime。 |
-| `POST /v2/users/{user_id}/memory/query` | 通过 retrieval planning 和 use gating 查询 normalized records。 |
-| `POST /v2/users/{user_id}/prompt-context` | 编译 Phase 2 memory context。 |
-| `GET /v2/users/{user_id}/memory/review-queue` | 查看需要用户确认的记忆。 |
-| `POST /v2/users/{user_id}/memory/review-queue/{review_id}/resolve` | approve 或 reject review queue items。 |
-| `PUT /v2/users/{user_id}/memory/settings` | 更新用户记忆设置。 |
-| `POST /v2/users/{user_id}/memory/{memory_id}/correct` | 纠正 normalized memory record。 |
-| `POST /v2/users/{user_id}/memory/{memory_id}/delete` | tombstone-delete 单条 normalized memory。 |
-| `POST /v2/users/{user_id}/memory/forget-all` | 带审计轨迹地清空用户记忆。 |
-| `GET /v2/users/{user_id}/memory/audit/export` | 导出 records、settings、review items、events 和 audit 数据。 |
-| `GET /v2/users/{user_id}/memory/profile-evidence` | 查看 inferred profile hypotheses 背后的证据。 |
-| `GET /v2/users/{user_id}/memory/events` | 查看 active event-state memories。 |
+| `POST /v2/users/{user_id}/turns/ingest` | 摄取一个 turn 到 normalized runtime。 |
+| `POST /v2/users/{user_id}/memory/query` | 检索并门控当前 query 的记忆。 |
+| `POST /v2/users/{user_id}/prompt-context` | 生成 model-ready memory context。 |
+| `GET /v2/users/{user_id}/memory/review-queue` | 查看需要确认的记忆。 |
+| `POST /v2/users/{user_id}/memory/{memory_id}/correct` | 纠正并退休冲突 records。 |
+| `POST /v2/users/{user_id}/memory/forget-all` | 带 audit trail 清空记忆。 |
+| `GET /v2/users/{user_id}/memory/audit/export` | 导出 records、settings、events、audit data。 |
 
-## 示例
+## 适合什么
 
-```bash
-curl -X POST http://127.0.0.1:8000/v2/users/demo/turns/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":"main","text":"我最近准备面试，有点焦虑。回答直接一点，先给结论。"}'
+适合：
 
-curl -X POST http://127.0.0.1:8000/v2/users/demo/prompt-context \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":"main","query":"面试怎么准备？","options":{"include_debug":true}}'
+| 产品 | 原因 |
+| --- | --- |
+| 个人助手 | 需要语气、结构、事件连续性。 |
+| AI companion | 需要自然理解用户，但不能强行提旧事。 |
+| Workflow agent | 需要记忆使用策略、review 和 audit。 |
+| 长期会话 | 需要纠错、过期抑制和状态演进。 |
+
+不适合：
+
+| 产品 | 更适合 |
+| --- | --- |
+| Stateless bot | 如果输出不应该适配用户，就不要加 memory。 |
+| 简单 transcript search | 用搜索或 RAG。 |
+| 完全黑盒 memory store | EvolveMemory 偏向可检查、可治理、可纠错。 |
+
+## 架构
+
+```mermaid
+flowchart TD
+  A["Dialogue turn"] --> B["Proposal extraction"]
+  B --> C["Write governance"]
+  C --> D["Normalized storage"]
+  D --> E["Retrieval planner"]
+  E --> F["Memory use gate"]
+  F --> G["Response policy"]
+  G --> H["Prompt context"]
+  D --> I["Correction / delete / forget-all"]
+  I --> J["Audit export"]
 ```
-
-生成的 context 会区分 direct user facts、style policy、event follow-up cues、
-hidden constraints、clarification prompts 和 current user query。这个分层是
-核心设计：模型可以使用记忆改变行为，但不会盲目暴露所有存储事实。
 
 ## 仓库结构
 
 ```text
-memory_system/   # extraction、writing、persistence、retrieval、gates、events、profiles、service runtime
-evals/           # gate evaluation runner、metrics、JSONL cases
-tests/           # runtime、persistence、API、correction、governance、v2 contract tests
+memory_system/   # extraction、writing、persistence、retrieval、gates、events、profiles
+evals/           # gate eval runner、metrics、JSONL cases
+tests/           # runtime、persistence、API、correction、governance tests
+examples/        # replay demos
+docs/            # 产品首页和设计说明
 app.py           # FastAPI service
 demo.py          # 本地命令行 demo
-data/            # 本地 JSON 或 SQLite 持久化输出
-docs/            # design review、roadmap 和 optimization notes
 ```
 
-## 适合与不适合
-
-| 适合 | 不适合 |
-| --- | --- |
-| 需要根据用户偏好调整语气、结构和 follow-up 的个人助手。 | 不希望记忆影响输出的 stateless bot。 |
-| 需要明确记忆写入策略和使用策略的 Agent 产品。 | 简单聊天记录搜索。 |
-| 查询时必须考虑隐私、相关性和时效性的工作流。 | 总是把所有检索记忆塞进 prompt 的系统。 |
-| 需要纠错、评审、删除、forget-all 和审计链路的应用。 | 完全黑盒、无法检查生命周期的记忆存储。 |
-
-## 当前边界
-
-EvolveMemory 目前仍是原型。它还没有证明长周期记忆质量、大规模用户模拟、多模型
-抽取质量、对抗 prompt 下的隐私鲁棒性，以及生产负载下的延迟表现。现有测试
-验证的是工程链路和核心行为 contract。更完整的 benchmark 应该加入噪声多轮
-对话、模糊用户意图、过期记忆、敏感事实、纠错冲突、多语言数据、模型抽取
-payload 和 API load measurements。
-
-## 路线图
+## Roadmap
 
 | 方向 | 下一步 |
 | --- | --- |
-| Evaluation | 扩展 gate、write-policy、correction、drift 和 long-context memory benchmarks。 |
-| Extraction | 增加生产级模型 provider、schema validation 和 disagreement checks。 |
-| Privacy | 强化敏感记忆策略、对抗 prompt 测试和用户控制。 |
-| Storage | 增加 migration tooling、retention policy 和 multi-user isolation hardening。 |
-| Agent integration | 提供 chatbot、workflow 和 multi-agent harness 示例。 |
+| Evaluation | 增加 noisy multi-turn、stale memory、correction、privacy benchmark。 |
+| Extraction | 增加 provider-backed extraction、schema validation 和 disagreement checks。 |
+| Privacy | 强化 sensitive-memory policy 和 adversarial prompt tests。 |
+| Integration | 提供 chatbot、workflow、multi-agent harness 示例。 |
+
+## Security
+
+不要提交真实用户对话、本地 SQLite、session JSON、API key，或包含个人数据的
+debug export。见 [SECURITY.md](SECURITY.md)。
 
 ## License
 
