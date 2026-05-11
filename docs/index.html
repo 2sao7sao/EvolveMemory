@@ -87,10 +87,10 @@
       </header>
 
       <section class="metrics">
-        <div class="metric"><span>Tests</span><strong>52 passed</strong></div>
+        <div class="metric"><span>Tests</span><strong>54 passed</strong></div>
         <div class="metric"><span>Gate eval</span><strong>8 / 8</strong></div>
-        <div class="metric"><span>Core risk</span><strong>Creepy recall</strong></div>
-        <div class="metric"><span>Best fit</span><strong>AI companion</strong></div>
+        <div class="metric"><span>Suppression</span><strong>1 / 1</strong></div>
+        <div class="metric"><span>Correction</span><strong>2 / 2</strong></div>
       </section>
 
       <section class="section grid two">
@@ -100,8 +100,8 @@
         </div>
         <div class="panel">
           <h2>Run the replay</h2>
-          <p>The replay shows the same stored memory used in one query and suppressed in another because the user explicitly says not to mention it.</p>
-          <code>python examples/replay_adaptive_memory.py</code>
+          <p>The replay shows event follow-up, style-only adaptation, explicit suppression, prompt safety, and correction retirement.</p>
+          <code>python -m memory_system.demo</code>
         </div>
       </section>
 
@@ -114,11 +114,11 @@
         <table>
           <thead><tr><th>Metric</th><th>Question</th></tr></thead>
           <tbody>
-            <tr><td>write precision</td><td>Was the memory worth saving?</td></tr>
-            <tr><td>use appropriateness</td><td>Was the memory safe and relevant for this turn?</td></tr>
-            <tr><td>creepy recall rate</td><td>Did the assistant mention something it should not mention?</td></tr>
-            <tr><td>style adaptation</td><td>Did the answer adapt without exposing private facts?</td></tr>
-            <tr><td>correction success</td><td>Did user corrections retire stale or unwanted memories?</td></tr>
+            <tr><td>gate_action_accuracy</td><td>Did expected memory-use actions match regression cases?</td></tr>
+            <tr><td>explicit_suppression_rate</td><td>Did a no-mention request suppress the matching event?</td></tr>
+            <tr><td>style_continuity_rate</td><td>Did preferences still shape answers without exposing facts?</td></tr>
+            <tr><td>prompt_safety_rate</td><td>Was direct visible memory omitted for the no-mention query?</td></tr>
+            <tr><td>correction_retirement_rate</td><td>Did correction retire sensitive state and derived profile memory?</td></tr>
           </tbody>
         </table>
       </section>

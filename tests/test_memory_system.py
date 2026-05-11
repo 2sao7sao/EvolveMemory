@@ -9,46 +9,48 @@ from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
+from app import app
+from evals.runner import run_product_replay_eval
 from memory_system import (
+    CareerEventSkill,
     DialogueMemoryExtractor,
     DiskSessionRepository,
-    CareerEventSkill,
     EventSkillRegistry,
     HybridMemoryScorer,
     LLMMemoryProposalExtractor,
     LLMProposalSchemaValidator,
-    MemoryOperationPlanner,
     MemoryCommand,
     MemoryCommandDetector,
     MemoryItem,
     MemoryLayer,
+    MemoryOperationPlanner,
     MemoryRecord,
-    MemoryUseAction,
-    MemoryUseGate,
-    NormalizedSQLiteMemoryRepository,
     MemorySlotRegistry,
     MemoryStore,
     MemoryType,
+    MemoryUseAction,
+    MemoryUseGate,
     MemoryWriteEvaluator,
-    ProfileInferencer,
+    NormalizedSQLiteMemoryRepository,
     ProfileAccumulator,
     ProfileEvidenceExtractor,
+    ProfileInferencer,
     PromptContextBuilder,
-    QueryMemoryRetriever,
     QueryIntentClassifier,
-    RetrievalPlanner,
+    QueryMemoryRetriever,
     ResponsePolicyEngine,
+    RetrievalPlanner,
     RuleMemoryProposalExtractor,
     Sensitivity,
-    TurnPreprocessor,
     SessionMemoryRuntime,
     SQLiteSessionRepository,
     StateDynamics,
     StructuredMemoryParser,
+    TurnPreprocessor,
     WeightedMemoryWriteEvaluatorV2,
     WritePolicyContext,
 )
-from app import app
+from memory_system.demo import format_demo_report, run_product_demo
 
 
 class MemorySystemTest(unittest.TestCase):
@@ -466,6 +468,23 @@ class MemorySystemTest(unittest.TestCase):
             "- directness_preference_level: high\n[Response Policy]",
             context["assembled_prompt"],
         )
+
+    def test_product_demo_reports_adaptive_memory_metrics(self) -> None:
+        report = run_product_demo()
+
+        self.assertTrue(report.passed)
+        self.assertEqual(report.metrics["gate_action_accuracy"].value, 1.0)
+        self.assertEqual(report.metrics["explicit_suppression_rate"].value, 1.0)
+        self.assertEqual(report.metrics["style_continuity_rate"].value, 1.0)
+        self.assertEqual(report.metrics["prompt_safety_rate"].value, 1.0)
+        self.assertEqual(report.metrics["correction_retirement_rate"].value, 1.0)
+        self.assertIn("Product metrics", format_demo_report(report))
+
+    def test_product_replay_eval_has_no_failures(self) -> None:
+        result = run_product_replay_eval()
+
+        self.assertEqual(result["failures"], [])
+        self.assertEqual(result["metrics"]["gate_action_accuracy"]["value"], 1.0)
 
     def test_disk_repository_persists_memories(self) -> None:
         with TemporaryDirectory() as temp_dir:

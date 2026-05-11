@@ -1,53 +1,80 @@
-# Adaptive Memory Replay
+# EvolveMemory Adaptive Replay
 
-This replay is the product story EvolveMemory should make obvious: memory should
-change the assistant's behavior, but it should not force irrelevant personal
-details into every answer.
+This replay is the product path EvolveMemory should make obvious: memory should
+adapt the assistant without forcing private details into the answer.
 
-## Conversation
+## Scenario
 
-| Turn | User input | Runtime behavior |
+The user gives two signals:
+
+```text
+1. 我最近准备面试，有点焦虑。
+2. 回答直接一点，先给结论。
+```
+
+A simple memory system might retrieve both memories and inject them into every
+future prompt. EvolveMemory uses the memory gate to decide which memories are
+allowed to shape the current answer.
+
+## Run It
+
+```bash
+python -m memory_system.demo
+```
+
+or:
+
+```bash
+python examples/replay_adaptive_memory.py
+```
+
+## Expected Output Shape
+
+```text
+# EvolveMemory Adaptive Replay
+
+status: PASS
+active_memories_before_correction: 7
+accepted_candidates: 4/4
+gate_eval: 8/8
+
+## 1. Interview query actions
+- life_event: follow_up
+- communication_style: style_only
+- response_opening: style_only
+
+## 3. Suppressed memories
+- life_event: suppress
+
+## 4. Product metrics
+- gate_action_accuracy: 1.00 (8/8)
+- explicit_suppression_rate: 1.00 (1/1)
+- style_continuity_rate: 1.00 (4/4)
+- prompt_safety_rate: 1.00 (1/1)
+- correction_retirement_rate: 1.00 (2/2)
+```
+
+## What The Metrics Mean
+
+| Metric | Definition | Why it matters |
 | --- | --- | --- |
-| 1 | 我最近准备面试，有点焦虑。 | Writes an evolving event and a sensitive emotional-state memory. |
-| 2 | 回答直接一点，先给结论。 | Writes communication-style preferences. |
-| 3 | 面试怎么准备？ | Uses the event as `follow_up`, emotion as `summarize_only`, and style as `style_only`. |
-| 4 | 今天只帮我 review Python 代码，不用提面试。 | Suppresses the interview event and keeps only the style policy. |
-| 5 | 其实我不想让你记住焦虑这件事。 | Routes to correction/deletion so the sensitive state can be retired. |
+| `gate_action_accuracy` | Share of expected gate actions matched by regression cases. | Retrieval must not automatically become prompt use. |
+| `explicit_suppression_rate` | Whether an explicit no-mention request suppresses matching event memory. | User intent must override memory recall. |
+| `style_continuity_rate` | Whether style preferences still shape relevant and unrelated queries. | Memory should adapt behavior without exposing private facts. |
+| `prompt_safety_rate` | Whether no direct visible memory is injected for the no-mention query. | Avoids creepy or unnecessary recall. |
+| `correction_retirement_rate` | Whether correction retires the sensitive state and derived profile memory. | Forgetting must remove behavioral residue, not only raw records. |
 
 ## Gate Expectations
 
-```json
-{
-  "interview_query": {
-    "life_event": "follow_up",
-    "current_emotional_state": "summarize_only",
-    "communication_style": "style_only"
-  },
-  "coding_query_with_no_mention": {
-    "life_event": "suppress",
-    "communication_style": "style_only"
-  }
-}
-```
-
-## Why This Matters
-
-Many memory systems retrieve what they remember and place it into the prompt.
-EvolveMemory separates retrieval from permission:
-
-```text
-stored memory -> retrieval planning -> memory use gate -> response policy
-```
-
-The goal is not to sound like the assistant remembers everything. The goal is
-for the assistant to adapt naturally, stay useful, and avoid awkward recall.
-
-## Metrics to Track
-
-| Metric | Definition |
+| Query | Expected behavior |
 | --- | --- |
-| `use_appropriateness` | Whether selected memories are relevant and safe for the query. |
-| `creepy_recall_rate` | How often the assistant mentions a memory that should stay silent. |
-| `style_adaptation_score` | Whether preferences change structure and tone without exposing facts. |
-| `correction_success_rate` | Whether user corrections retire or update stale memories. |
-| `sensitive_suppression_rate` | Whether sensitive facts are blocked unless strongly relevant. |
+| `面试怎么准备？` | `life_event -> follow_up`; style preferences stay `style_only`. |
+| `今天只帮我 review Python 代码，不用提面试。` | `life_event -> suppress`; style preferences stay `style_only`. |
+| `其实我不想让你记住焦虑这件事。` | Retire `current_emotional_state` and derived `emotional_support_need`. |
+
+## Product Boundary
+
+This replay uses deterministic rule extraction and deterministic gate logic. It
+does not claim to solve all personal-memory cases. It proves a concrete runtime
+contract: a memory must pass write policy, retrieval, use gate, prompt-safety,
+and correction checks before it can influence an answer.

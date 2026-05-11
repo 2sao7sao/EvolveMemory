@@ -10,7 +10,6 @@ from evals.metrics import AccuracyMetric
 from memory_system import DialogueMemoryExtractor, MemoryUseGate, ProfileInferencer
 from memory_system.engine import MemoryStore
 
-
 DEFAULT_CASES_DIR = Path(__file__).resolve().parent / "cases"
 
 
@@ -52,17 +51,46 @@ def run_gate_eval(cases_dir: Path = DEFAULT_CASES_DIR) -> dict[str, object]:
     }
 
 
+def run_product_replay_eval() -> dict[str, object]:
+    from memory_system.demo import run_product_demo
+
+    report = run_product_demo()
+    failures = [
+        {
+            "metric": metric.key,
+            "expected": 1.0,
+            "actual": metric.value,
+        }
+        for metric in report.metrics.values()
+        if metric.value < 1.0
+    ]
+    return {
+        "suite": "product_replay_eval",
+        "metrics": {
+            metric.key: {
+                "value": round(metric.value, 4),
+                "correct": metric.numerator,
+                "total": metric.denominator,
+            }
+            for metric in report.metrics.values()
+        },
+        "failures": failures,
+    }
+
+
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite", default="gate_eval", choices=["gate_eval"])
+    parser.add_argument("--suite", default="gate_eval", choices=["gate_eval", "product_replay_eval"])
     parser.add_argument("--cases-dir", default=str(DEFAULT_CASES_DIR))
     args = parser.parse_args()
     if args.suite == "gate_eval":
         result = run_gate_eval(Path(args.cases_dir))
+    elif args.suite == "product_replay_eval":
+        result = run_product_replay_eval()
     else:
         raise ValueError(f"Unsupported suite: {args.suite}")
     print(json.dumps(result, ensure_ascii=False, indent=2))
