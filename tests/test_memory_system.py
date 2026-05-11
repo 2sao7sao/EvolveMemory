@@ -187,6 +187,22 @@ class MemorySystemTest(unittest.TestCase):
         self.assertEqual(result.decisions[0].action, MemoryUseAction.FOLLOW_UP)
         self.assertEqual(result.decisions[0].layer, MemoryLayer.EPISODIC_EVENT)
 
+    def test_memory_use_gate_respects_explicit_no_mention_request(self) -> None:
+        event = self.extractor.extract(
+            "我最近准备面试。",
+            source="turn_1",
+            timestamp=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+        )[0]
+
+        result = self.use_gate.select(
+            "今天只帮我 review Python 代码，不用提面试。",
+            [event],
+            now=datetime(2026, 4, 17, 9, 0, tzinfo=self.tz),
+        )
+
+        self.assertFalse(result.selected)
+        self.assertEqual(result.suppressed[0].action, MemoryUseAction.SUPPRESS)
+
     def test_memory_use_gate_enforces_never_prompt_allowed_use(self) -> None:
         memory = MemoryItem(
             memory_type=MemoryType.STATE,

@@ -33,6 +33,15 @@ User turn -> Proposals -> Write policy -> Store -> Retrieve -> Use gate -> Respo
 EvolveMemory 把记忆视为控制系统。一个记忆只有在正确时刻改变模型行为，并在
 无关、敏感、过期或低置信度时保持沉默，才真正有价值。
 
+## 产品原则
+
+目标不是让助手不断强调“我记得你”，而是让记忆自然改善下一次交互，同时避免
+刻意、尴尬或无关的提及。
+
+```text
+记住重要信息 -> 判断能否使用 -> 调整回答方式 -> 无关时保持沉默
+```
+
 ## 核心设计
 
 | 层级 | 做什么 | 产品价值 |
@@ -76,15 +85,15 @@ flowchart TD
 
 | 信号 | 当前结果 | 命令 |
 | --- | ---: | --- |
-| Runtime 与 API 测试 | `51 / 51 passed` | `python -m unittest discover -s tests -p "test_*.py"` |
-| Pytest 兼容性 | `51 / 51 passed` | `python -m pytest -q` |
-| Gate action eval | `6 / 6 correct` | `python -m evals.runner --suite gate_eval` |
+| Runtime 与 API 测试 | `52 / 52 passed` | `python -m unittest discover -s tests -p "test_*.py"` |
+| Pytest 兼容性 | `52 / 52 passed` | `python -m pytest -q` |
+| Gate action eval | `8 / 8 correct` | `python -m evals.runner --suite gate_eval` |
 | Gate action accuracy | `1.0000` | `python -m evals.runner --suite gate_eval` |
 
-当前 eval suite 包含两个种子场景：面试准备相关记忆应该触发 follow-up 和
-style policy；与代码任务无关的敏感事实应该被 suppress。这是回归种子，不是
-大规模 benchmark。它的价值在于验证一个核心产品判断：检索到记忆不等于允许
-使用记忆。
+当前 eval suite 包含三个种子场景：面试准备相关记忆应该触发 follow-up 和
+style policy；与代码任务无关的敏感事实应该被 suppress；用户明确说“不用提”
+某个事件时，应抑制该事件但保留风格偏好。这是回归种子，不是大规模 benchmark。
+它的价值在于验证一个核心产品判断：检索到记忆不等于允许使用记忆。
 
 测试覆盖 legacy runtime 兼容、normalized SQLite storage、write-governance
 operations、review queue、sensitivity handling、event skills、profile
@@ -112,6 +121,10 @@ python demo.py
 python -m unittest discover -s tests -p "test_*.py"
 python -m evals.runner --suite gate_eval
 ```
+
+查看自适应记忆 replay：
+
+- [Adaptive memory replay](examples/adaptive_memory_replay.md)
 
 启动 API：
 

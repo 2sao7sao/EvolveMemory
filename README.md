@@ -35,6 +35,15 @@ EvolveMemory treats memory as a control system. A memory is valuable only if it
 can change behavior at the right moment and stay silent when it is irrelevant,
 sensitive, stale, or low-confidence.
 
+## Product Principle
+
+The goal is not to make the assistant mention everything it knows. The goal is
+for memory to improve the next interaction without feeling forced.
+
+```text
+Remember what matters -> gate what may be used -> adapt the response -> stay silent when irrelevant
+```
+
 ## Core Design
 
 | Layer | What it does | Product value |
@@ -78,16 +87,18 @@ Last verified locally on **2026-05-07**.
 
 | Signal | Current result | Command |
 | --- | ---: | --- |
-| Runtime and API tests | `51 / 51 passed` | `python -m unittest discover -s tests -p "test_*.py"` |
-| Pytest compatibility | `51 / 51 passed` | `python -m pytest -q` |
-| Gate action eval | `6 / 6 correct` | `python -m evals.runner --suite gate_eval` |
+| Runtime and API tests | `52 / 52 passed` | `python -m unittest discover -s tests -p "test_*.py"` |
+| Pytest compatibility | `52 / 52 passed` | `python -m pytest -q` |
+| Gate action eval | `8 / 8 correct` | `python -m evals.runner --suite gate_eval` |
 | Gate action accuracy | `1.0000` | `python -m evals.runner --suite gate_eval` |
 
-The current eval suite contains two seed scenarios: interview-preparation
-memory should trigger follow-up and style policy, while irrelevant sensitive
-facts should be suppressed for an unrelated coding task. This is a regression
-seed, not a large-scale benchmark. It is useful because it tests the core
-product distinction: memory retrieval is not the same as memory permission.
+The current eval suite contains three seed scenarios: interview-preparation
+memory should trigger follow-up and style policy, irrelevant sensitive facts
+should be suppressed for an unrelated coding task, and explicit "do not mention"
+requests should suppress the related event while preserving style preferences.
+This is a regression seed, not a large-scale benchmark. It is useful because it
+tests the core product distinction: memory retrieval is not the same as memory
+permission.
 
 The test suite covers legacy runtime compatibility, normalized SQLite storage,
 write-governance operations, review queue flows, sensitivity handling, event
@@ -115,6 +126,10 @@ Run tests and evals:
 python -m unittest discover -s tests -p "test_*.py"
 python -m evals.runner --suite gate_eval
 ```
+
+Read the adaptive replay:
+
+- [Adaptive memory replay](examples/adaptive_memory_replay.md)
 
 Start the API:
 

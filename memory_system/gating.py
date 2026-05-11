@@ -66,6 +66,16 @@ class MemoryUseGate:
     RELATION_TERMS = ("恋爱", "分手", "伴侣", "关系", "结婚")
     EMOTION_TERMS = ("焦虑", "压力", "情绪", "难受", "迷茫")
     STYLE_TERMS = ("怎么回答", "说法", "沟通", "风格", "详细", "简洁", "直接")
+    EXPLICIT_SUPPRESSION_MARKERS = ("不用提", "不要提", "别提", "先不聊", "不需要提")
+    VALUE_TERMS = {
+        "prepare_interview": ("面试", "interview"),
+        "prepare_exam": ("考试", "exam"),
+        "job_seeking": ("找工作", "求职", "job"),
+        "lost_job": ("失业", "离职", "lost job"),
+        "started_new_job": ("新工作", "入职", "new job"),
+        "breakup": ("分手", "breakup"),
+        "moved_home": ("搬家", "moved"),
+    }
     EVENT_PROGRESS_VALUES = {
         "prepare_interview",
         "prepare_exam",
@@ -118,7 +128,10 @@ class MemoryUseGate:
             + 0.06 * factors["token_efficiency"]
             + 0.06 * factors["contradiction_safety"]
         )
-        action = self._action(memory, layer, score, factors)
+        if self._explicitly_suppressed(query, memory):
+            action = MemoryUseAction.SUPPRESS
+        else:
+            action = self._action(memory, layer, score, factors)
         prompt_visibility, safe_to_mention = self._visibility(action, memory, factors)
         return MemoryGateDecision(
             memory=memory,
@@ -247,6 +260,16 @@ class MemoryUseGate:
             return self._enforce_allowed_use(memory, MemoryUseAction.FOLLOW_UP)
         return self._enforce_allowed_use(memory, MemoryUseAction.USE_DIRECTLY)
 
+    def _explicitly_suppressed(self, query: str, memory: MemoryItem) -> bool:
+        if not self._has_any(query, self.EXPLICIT_SUPPRESSION_MARKERS):
+            return False
+        value_terms = self.VALUE_TERMS.get(str(memory.value), ())
+        if value_terms and self._has_any(query, value_terms):
+            return True
+        haystack = f"{memory.key} {memory.value} {memory.evidence}".lower()
+        lowered_query = query.lower()
+        return any(term.lower() in haystack and term.lower() in lowered_query for term in value_terms)
+
     def _enforce_allowed_use(
         self,
         memory: MemoryItem,
@@ -309,6 +332,8 @@ class MemoryUseGate:
             rationale.append("event is likely still evolving and may need progress follow-up")
         if factors["privacy_safety"] < 0.5:
             rationale.append("sensitive memory requires stronger relevance before use")
+        if action == MemoryUseAction.SUPPRESS:
+            rationale.append("memory suppressed for the current query")
         return rationale
 
     def _event_needs_progress(self, memory: MemoryItem) -> bool:
