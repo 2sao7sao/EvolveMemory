@@ -1,43 +1,81 @@
-<svg width="1200" height="420" viewBox="0 0 1200 420" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EvolveMemory mode matrix">
-  <rect width="1200" height="420" rx="18" fill="#121516"/>
-  <text x="54" y="64" fill="#f4f0e8" font-family="Arial, sans-serif" font-size="28" font-weight="700">Memory Operation Modes</text>
-  <text x="54" y="94" fill="#aeb9b6" font-family="Arial, sans-serif" font-size="15">Each mode is a separable component in the memory lifecycle.</text>
+<svg width="1200" height="520" viewBox="0 0 1200 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">EvolveMemory runtime contract</title>
+  <desc id="desc">Code-derived runtime flow from turn preprocessing through proposal extraction, write governance, retrieval scoring, memory-use gate, prompt context, correction, and audit.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#4BAF98"/>
+    </marker>
+    <style>
+      .bg { fill: #fbfffd; }
+      .panel { fill: #ffffff; stroke: #d2e1dc; stroke-width: 1.5; }
+      .green { fill: #effaf6; stroke: #b9dcd2; stroke-width: 1.5; }
+      .blue { fill: #f1f7ff; stroke: #afcaea; stroke-width: 1.5; }
+      .gold { fill: #fff8ea; stroke: #e5cb88; stroke-width: 1.5; }
+      .text { fill: #17352f; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .muted { fill: #647b74; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .mono { fill: #23594f; font-family: "SFMono-Regular", Menlo, Consolas, ui-monospace, monospace; }
+      .line { stroke: #4BAF98; stroke-width: 2; marker-end: url(#arrow); }
+      .softline { stroke: #9bcfc2; stroke-width: 1.5; stroke-dasharray: 5 7; }
+    </style>
+  </defs>
 
-  <g font-family="Arial, sans-serif">
-    <rect x="54" y="140" width="170" height="180" rx="12" fill="#202627" stroke="#425351"/>
-    <text x="78" y="178" fill="#65d6c7" font-size="18" font-weight="700">Observe</text>
-    <text x="78" y="214" fill="#c0c9c6" font-size="13">Extract candidate</text>
-    <text x="78" y="236" fill="#c0c9c6" font-size="13">memories from turns</text>
-    <text x="78" y="276" fill="#8f9d99" font-size="12">Output: MemoryItem[]</text>
+  <rect width="1200" height="520" rx="22" class="bg"/>
+  <text x="56" y="66" class="text" font-size="32" font-weight="760">Runtime contract: candidate, ranked, permitted, compiled, audited</text>
+  <text x="56" y="96" class="muted" font-size="16">The diagram follows the current code path in app.py, extraction.py, writing.py, retrieval.py, gating.py, context.py, and persistence.py.</text>
 
-    <rect x="246" y="140" width="170" height="180" rx="12" fill="#202627" stroke="#425351"/>
-    <text x="270" y="178" fill="#d1b15f" font-size="18" font-weight="700">Write</text>
-    <text x="270" y="214" fill="#c0c9c6" font-size="13">Score, accept,</text>
-    <text x="270" y="236" fill="#c0c9c6" font-size="13">reject, or merge</text>
-    <text x="270" y="276" fill="#8f9d99" font-size="12">Output: WriteDecision</text>
+  <rect x="56" y="156" width="148" height="128" rx="16" class="panel"/>
+  <text x="82" y="194" class="text" font-size="18" font-weight="720">Turn</text>
+  <text x="82" y="226" class="mono" font-size="13">TurnPreprocessor</text>
+  <text x="82" y="252" class="muted" font-size="13">memory command</text>
 
-    <rect x="438" y="140" width="170" height="180" rx="12" fill="#202627" stroke="#425351"/>
-    <text x="462" y="178" fill="#65d6c7" font-size="18" font-weight="700">Retrieve</text>
-    <text x="462" y="214" fill="#c0c9c6" font-size="13">Select active</text>
-    <text x="462" y="236" fill="#c0c9c6" font-size="13">query memory</text>
-    <text x="462" y="276" fill="#8f9d99" font-size="12">Output: relevant set</text>
+  <line x1="204" y1="220" x2="244" y2="220" class="line"/>
 
-    <rect x="630" y="140" width="170" height="180" rx="12" fill="#202627" stroke="#425351"/>
-    <text x="654" y="178" fill="#d1b15f" font-size="18" font-weight="700">Adapt</text>
-    <text x="654" y="214" fill="#c0c9c6" font-size="13">Convert memory</text>
-    <text x="654" y="236" fill="#c0c9c6" font-size="13">to answer policy</text>
-    <text x="654" y="276" fill="#8f9d99" font-size="12">Output: policy</text>
+  <rect x="244" y="156" width="148" height="128" rx="16" class="blue"/>
+  <text x="270" y="194" class="text" font-size="18" font-weight="720">Candidate</text>
+  <text x="270" y="226" class="mono" font-size="13">Rule / LLM</text>
+  <text x="270" y="252" class="muted" font-size="13">MemoryRecord[]</text>
 
-    <rect x="822" y="140" width="170" height="180" rx="12" fill="#202627" stroke="#425351"/>
-    <text x="846" y="178" fill="#65d6c7" font-size="18" font-weight="700">Correct</text>
-    <text x="846" y="214" fill="#c0c9c6" font-size="13">User overrides</text>
-    <text x="846" y="236" fill="#c0c9c6" font-size="13">or retires memory</text>
-    <text x="846" y="276" fill="#8f9d99" font-size="12">Output: new state</text>
+  <line x1="392" y1="220" x2="432" y2="220" class="line"/>
 
-    <rect x="1014" y="140" width="132" height="180" rx="12" fill="#202627" stroke="#425351"/>
-    <text x="1038" y="178" fill="#d1b15f" font-size="18" font-weight="700">Audit</text>
-    <text x="1038" y="214" fill="#c0c9c6" font-size="13">Explain lifecycle</text>
-    <text x="1038" y="236" fill="#c0c9c6" font-size="13">changes</text>
-    <text x="1038" y="276" fill="#8f9d99" font-size="12">Output: log</text>
-  </g>
+  <rect x="432" y="156" width="148" height="128" rx="16" class="green"/>
+  <text x="458" y="194" class="text" font-size="18" font-weight="720">Govern</text>
+  <text x="458" y="226" class="mono" font-size="13">WriteEvaluatorV2</text>
+  <text x="458" y="252" class="muted" font-size="13">create / review</text>
+
+  <line x1="580" y1="220" x2="620" y2="220" class="line"/>
+
+  <rect x="620" y="156" width="148" height="128" rx="16" class="panel"/>
+  <text x="646" y="194" class="text" font-size="18" font-weight="720">Store</text>
+  <text x="646" y="226" class="mono" font-size="13">NormalizedSQLite</text>
+  <text x="646" y="252" class="muted" font-size="13">records + events</text>
+
+  <line x1="768" y1="220" x2="808" y2="220" class="line"/>
+
+  <rect x="808" y="156" width="148" height="128" rx="16" class="gold"/>
+  <text x="834" y="194" class="text" font-size="18" font-weight="720">Rank</text>
+  <text x="834" y="226" class="mono" font-size="13">Retrieval v3</text>
+  <text x="834" y="252" class="muted" font-size="13">ScoreBreakdown</text>
+
+  <line x1="956" y1="220" x2="996" y2="220" class="line"/>
+
+  <rect x="996" y="156" width="148" height="128" rx="16" class="green"/>
+  <text x="1022" y="194" class="text" font-size="18" font-weight="720">Permit</text>
+  <text x="1022" y="226" class="mono" font-size="13">MemoryUseGate</text>
+  <text x="1022" y="252" class="muted" font-size="13">actions + visibility</text>
+
+  <rect x="244" y="354" width="188" height="96" rx="16" class="panel"/>
+  <text x="272" y="390" class="text" font-size="18" font-weight="720">Response policy</text>
+  <text x="272" y="420" class="mono" font-size="13">tone, detail, structure</text>
+
+  <rect x="506" y="354" width="188" height="96" rx="16" class="blue"/>
+  <text x="534" y="390" class="text" font-size="18" font-weight="720">Prompt safety</text>
+  <text x="534" y="420" class="mono" font-size="13">ContextCompiler</text>
+
+  <rect x="768" y="354" width="188" height="96" rx="16" class="gold"/>
+  <text x="796" y="390" class="text" font-size="18" font-weight="720">Audit controls</text>
+  <text x="796" y="420" class="mono" font-size="13">correct / delete / export</text>
+
+  <path d="M1070 284 C1070 330 600 315 600 354" class="softline"/>
+  <path d="M600 450 C600 482 338 482 338 450" class="softline"/>
+  <path d="M600 450 C600 482 862 482 862 450" class="softline"/>
 </svg>

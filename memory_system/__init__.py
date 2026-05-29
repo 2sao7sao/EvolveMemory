@@ -1,5 +1,13 @@
 """Prototype memory system for conversational personalization."""
 
+from .activation import (
+    ActivationEngine,
+    MemoryLifecycle,
+    StateTemporalAnomaly,
+    StateTemporalAnomalyDetector,
+)
+from .causal import CausalRelevanceScorer
+from .context import CompiledMemoryContext, ContextCompiler
 from .engine import (
     DialogueMemoryExtractor,
     MemoryStore,
@@ -8,7 +16,6 @@ from .engine import (
     QueryMemoryRetriever,
     ResponsePolicyEngine,
 )
-from .context import CompiledMemoryContext, ContextCompiler
 from .events import (
     CareerEventSkill,
     EventSkillRegistry,
@@ -34,6 +41,8 @@ from .gating import (
     MemoryUseAction,
     MemoryUseGate,
 )
+from .gravity import ContextResolution, SemanticGravityEngine
+from .math_core import ScoreBreakdown, clamp, logistic, weighted_sum
 from .models import (
     AllowedUse,
     Authority,
@@ -94,11 +103,14 @@ from .writing import (
 __all__ = [
     "AuditAction",
     "AllowedUse",
+    "ActivationEngine",
     "Authority",
     "CompiledMemoryContext",
     "ContextCompiler",
+    "ContextResolution",
     "Contradiction",
     "ContradictionDetector",
+    "CausalRelevanceScorer",
     "CareerEventSkill",
     "DialogueMemoryExtractor",
     "DeterministicHashEmbeddingProvider",
@@ -117,6 +129,7 @@ __all__ = [
     "MemoryGraphEdge",
     "MemoryItem",
     "MemoryLayer",
+    "MemoryLifecycle",
     "MemoryOperation",
     "MemoryOperationType",
     "MemoryOperationPlanner",
@@ -148,11 +161,15 @@ __all__ = [
     "ResponsePolicy",
     "ResponsePolicyEngine",
     "RuleMemoryProposalExtractor",
+    "ScoreBreakdown",
+    "SemanticGravityEngine",
     "SensitivityClassifier",
     "SessionMemoryRuntime",
     "SessionRepository",
     "SQLiteSessionRepository",
     "SlotDefinition",
+    "StateTemporalAnomaly",
+    "StateTemporalAnomalyDetector",
     "StateDynamics",
     "Sensitivity",
     "StructuredMemoryParser",
@@ -165,4 +182,7 @@ __all__ = [
     "WritePolicyContext",
     "memory_extraction_schema",
     "MemorySlotRegistry",
+    "clamp",
+    "logistic",
+    "weighted_sum",
 ]

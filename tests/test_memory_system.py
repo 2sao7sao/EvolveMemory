@@ -24,8 +24,12 @@ from memory_system import (
     MemoryCommandDetector,
     MemoryItem,
     MemoryLayer,
+    ActivationEngine,
+    CausalRelevanceScorer,
     MemoryOperationPlanner,
     MemoryRecord,
+    ScoreBreakdown,
+    SemanticGravityEngine,
     MemorySlotRegistry,
     MemoryStore,
     MemoryType,
@@ -47,6 +51,7 @@ from memory_system import (
     Sensitivity,
     SessionMemoryRuntime,
     SQLiteSessionRepository,
+    StateTemporalAnomalyDetector,
     StateDynamics,
     StructuredMemoryParser,
     TurnPreprocessor,
@@ -1032,6 +1037,99 @@ class MemorySystemTest(unittest.TestCase):
         self.assertEqual(scores[0].memory.key, "life_event")
         self.assertGreater(scores[0].factors["keyword"], 0)
         self.assertGreater(scores[0].factors["layer_prior"], 0.9)
+
+    def test_score_breakdown_serializes_formula_and_factors(self) -> None:
+        breakdown = ScoreBreakdown(
+            name="demo",
+            score=0.81234,
+            probability=0.81234,
+            factors={"keyword": 0.7},
+            weights={"keyword": 0.22},
+            formula="S=0.22K",
+            rationale=["explainable score"],
+            version="test-v1",
+        )
+
+        payload = breakdown.to_dict()
+
+        self.assertEqual(payload["score"], 0.8123)
+        self.assertEqual(payload["formula"], "S=0.22K")
+        self.assertEqual(payload["factors"], {"keyword": 0.7})
+
+    def test_activation_engine_scores_temporal_anomaly_for_persistent_state(self) -> None:
+        first_seen = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        now = datetime(2026, 6, 1, 9, 0, tzinfo=self.tz)
+        memory = MemoryItem(
+            memory_type=MemoryType.STATE,
+            key="current_emotional_state",
+            value="anxious",
+            confidence=0.82,
+            source="turn_1",
+            evidence="焦虑",
+            valid_from=first_seen,
+            dynamics=StateDynamics.FLUID,
+        )
+
+        anomaly = StateTemporalAnomalyDetector().score(memory, now=now, recurrence_count=3)
+        activation = ActivationEngine().score(memory, now=now, recurrence_count=3)
+
+        self.assertIn(anomaly.phase, {"extended", "anomalous", "escalated"})
+        self.assertGreater(anomaly.score, 0.8)
+        self.assertGreater(activation.factors["anomaly"], 0)
+        self.assertIn("activation", activation.name)
+
+    def test_semantic_gravity_weights_life_events_above_style_preferences(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        job_memory = MemoryItem(
+            memory_type=MemoryType.STATE,
+            key="work_status",
+            value="between_jobs",
+            confidence=0.84,
+            source="turn_1",
+            evidence="失业",
+            valid_from=timestamp,
+        )
+        style_memory = MemoryItem(
+            memory_type=MemoryType.PREFERENCE,
+            key="communication_style",
+            value="direct",
+            confidence=0.93,
+            source="turn_2",
+            evidence="直接一点",
+            valid_from=timestamp,
+        )
+        engine = SemanticGravityEngine()
+
+        job_gravity = engine.score(job_memory, query="最近找工作压力很大")
+        style_gravity = engine.score(style_memory, query="最近找工作压力很大")
+
+        self.assertGreater(job_gravity.score, style_gravity.score)
+        self.assertIn("G_final", job_gravity.formula)
+
+    def test_causal_relevance_recovers_low_keyword_health_constraint(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        memory = MemoryItem(
+            memory_type=MemoryType.STATE,
+            key="health_constraint",
+            value="cephalosporin_alcohol_risk",
+            confidence=0.9,
+            source="turn_1",
+            evidence="头孢期间不能喝酒",
+            valid_from=timestamp,
+        )
+        plan = RetrievalPlanner().plan("今晚聚会能不能喝酒？", max_prompt_memories=8)
+        score = HybridMemoryScorer().score(
+            "今晚聚会能不能喝酒？",
+            [memory],
+            now=timestamp,
+            plan=plan,
+        )[0]
+        causal = CausalRelevanceScorer().score("今晚聚会能不能喝酒？", memory)
+
+        self.assertGreater(causal.score, 0.9)
+        self.assertGreater(score.factors["causal_relevance"], 0.9)
+        self.assertGreater(score.factors["semantic_gravity"], 0.8)
+        self.assertEqual(score.breakdown.version, "retrieval-v3.0")
 
     def test_write_policy_rejects_low_value_memory(self) -> None:
         memory = MemoryItem(

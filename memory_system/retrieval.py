@@ -7,6 +7,10 @@ from math import sqrt
 import re
 from typing import Protocol
 
+from .activation import ActivationEngine
+from .causal import CausalRelevanceScorer
+from .gravity import SemanticGravityEngine
+from .math_core import ScoreBreakdown, clamp, weighted_sum
 from .models import MemoryLayer
 from .schema import MemoryItem
 
@@ -80,7 +84,17 @@ class QueryIntentClassifier:
 class RetrievalPlanner:
     def plan(self, query: str, *, max_prompt_memories: int) -> RetrievalPlan:
         intent = QueryIntentClassifier().classify(query)
-        modes = ["normalized_sqlite", "hybrid", "keyword", "temporal", "recent"]
+        modes = [
+            "normalized_sqlite",
+            "hybrid",
+            "keyword",
+            "embedding",
+            "temporal",
+            "activation",
+            "causal",
+            "semantic_gravity",
+            "recent",
+        ]
         include_layers: list[MemoryLayer] = []
         reasons = [f"intent={intent.name}"]
         if intent.name == "career_advice":
@@ -181,21 +195,50 @@ class HybridRetrievalScore:
     memory: MemoryItem
     score: float
     factors: dict[str, float]
+    breakdown: ScoreBreakdown | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "memory": self.memory.to_dict(),
             "score": round(self.score, 3),
             "factors": {key: round(value, 3) for key, value in self.factors.items()},
         }
+        if self.breakdown is not None:
+            payload["breakdown"] = self.breakdown.to_dict()
+        return payload
 
 
 class HybridMemoryScorer:
+    RETRIEVAL_V2_WEIGHTS = {
+        "keyword": 0.34,
+        "embedding": 0.30,
+        "freshness": 0.18,
+        "layer_prior": 0.18,
+    }
+    RETRIEVAL_V3_WEIGHTS = {
+        "keyword": 0.22,
+        "embedding": 0.22,
+        "freshness": 0.14,
+        "layer_prior": 0.14,
+        "activation": 0.14,
+        "causal_relevance": 0.08,
+        "semantic_gravity": 0.06,
+    }
+
     def __init__(
         self,
         embedding_provider: EmbeddingProvider | None = None,
+        *,
+        use_math_runtime: bool = True,
+        activation_engine: ActivationEngine | None = None,
+        causal_scorer: CausalRelevanceScorer | None = None,
+        semantic_gravity_engine: SemanticGravityEngine | None = None,
     ) -> None:
         self.embedding_provider = embedding_provider or DeterministicHashEmbeddingProvider()
+        self.use_math_runtime = use_math_runtime
+        self.activation_engine = activation_engine or ActivationEngine()
+        self.causal_scorer = causal_scorer or CausalRelevanceScorer()
+        self.semantic_gravity_engine = semantic_gravity_engine or SemanticGravityEngine()
 
     def score(
         self,
@@ -228,13 +271,47 @@ class HybridMemoryScorer:
             "freshness": self._freshness(memory, now),
             "layer_prior": self._layer_prior(memory, plan),
         }
-        score = (
-            0.34 * factors["keyword"]
-            + 0.30 * factors["embedding"]
-            + 0.18 * factors["freshness"]
-            + 0.18 * factors["layer_prior"]
+        weights = self.RETRIEVAL_V2_WEIGHTS
+        formula = "S_ret-v2=0.34K+0.30E+0.18F+0.18L"
+        version = "retrieval-v2.0"
+        rationale = ["hybrid keyword, embedding, freshness, and layer prior"]
+        if self.use_math_runtime:
+            activation = self.activation_engine.score(memory, now=now)
+            causal = self.causal_scorer.score(query, memory)
+            semantic_gravity = self.semantic_gravity_engine.score(memory, query=query)
+            factors.update(
+                {
+                    "activation": activation.score,
+                    "causal_relevance": causal.score,
+                    "semantic_gravity": semantic_gravity.score,
+                }
+            )
+            weights = self.RETRIEVAL_V3_WEIGHTS
+            formula = "S_ret-v3=0.22K+0.22E+0.14F+0.14L+0.14A+0.08C+0.06G"
+            version = "retrieval-v3.0"
+            rationale = [
+                "retrieval uses lexical and embedding match without treating retrieval as permission",
+                *activation.rationale,
+                *causal.rationale,
+                *semantic_gravity.rationale,
+            ]
+        score = clamp(weighted_sum(factors, weights))
+        breakdown = ScoreBreakdown(
+            name="retrieval",
+            score=score,
+            probability=score,
+            factors=factors,
+            weights=weights,
+            formula=formula,
+            rationale=rationale,
+            version=version,
         )
-        return HybridRetrievalScore(memory=memory, score=score, factors=factors)
+        return HybridRetrievalScore(
+            memory=memory,
+            score=score,
+            factors=factors,
+            breakdown=breakdown,
+        )
 
     def _keyword_overlap(self, query: str, text: str) -> float:
         query_tokens = set(tokenize_text(query))

@@ -1,4 +1,4 @@
-<img src="assets/adaptive-memory-engine-hero.png" alt="EvolveMemory banner" width="100%" />
+<img src="assets/evolvememory-math-runtime-hero.png" alt="EvolveMemory 数学记忆运行时主视觉" width="100%" />
 
 <p align="center">
   <a href="./README.md">English</a>
@@ -19,41 +19,41 @@
 
 # EvolveMemory
 
-**自适应记忆运行时：决定什么该记、什么能用、什么要隐藏、什么必须忘掉。**
+**面向 AI 个性化的可治理自适应记忆运行时。**
 
-记忆应该让 AI 更自然、更懂用户，而不是让助手在每个回答里生硬地牵扯旧事。
+EvolveMemory 不是聊天记录仓库，也不是向量数据库封装。它是一套 runtime：
+判断什么应该被记住、什么只是候选、什么可以影响回答、什么必须隐藏，以及什么应该被纠正或遗忘。
 
-EvolveMemory 把记忆设计成产品控制层：
+> Retrieval 不是 permission。被检索出来的 memory 只是 candidate，必须经过
+> memory-use gate 决定它能否直接使用、转成风格策略、作为 follow-up cue、作为
+> hidden constraint、只做摘要，或者被 suppress。
 
-> 选择性写入，检索候选记忆，门控使用权限，编译安全 prompt context，并支持纠错和遗忘。
-
-## 核心主张
-
-Retrieval 不是 permission。被检索出来的 memory 只是候选信号，必须经过 memory-use gate 决定它能否作为直接事实、风格、follow-up、hidden constraint、clarification、summarize-only context，或者必须被 suppress。LLM extraction 也遵守同一规则：模型输出只能提出候选，确定性的 validation 和 write governance 才是写入裁决者。
-
-![EvolveMemory adaptive replay](docs/assets/evolvememory-gate-replay.svg)
-
-## 30 秒产品路径
+## Runtime Contract
 
 ```text
-User turn
-  -> memory proposal
+user turn
+  -> proposal extraction
   -> write governance
   -> normalized store
-  -> retrieval planning
+  -> retrieval plan
+  -> hybrid math score
   -> memory-use gate
   -> response policy
-  -> safe prompt context
-  -> correction / audit
+  -> prompt-safe context
+  -> correction / audit / evals
 ```
 
-| 常见 memory 系统 | EvolveMemory |
+<img src="assets/mode_matrix.svg" alt="EvolveMemory runtime 模式：observe、write、retrieve、adapt、correct、audit" width="100%" />
+
+| Runtime 边界 | 契约 |
 | --- | --- |
-| 把抽取到的事实都存下来 | 先判断 candidate 是否值得写入 |
-| 检索到就注入 prompt | 区分 retrieval 和 permission |
-| 过度提及私人细节 | 用 direct、style-only、follow-up、summarize-only、hidden、clarify、suppress 控制使用 |
-| 让 prompt 越来越长 | 只编译 prompt-safe context |
-| 纠错和遗忘路径弱 | 支持 correction、retirement、forget-all、review queue、audit export |
+| Observe | 从用户 turn 或 provider-free LLM payload 中抽取候选记忆。 |
+| Govern | 校验、打分、进入 review、拒绝、合并或 supersede candidate。 |
+| Store | 保存 normalized records、evidence、event states、settings 和 audit logs。 |
+| Retrieve | 按 intent、relevance、lifecycle、causal impact、semantic gravity 排序候选。 |
+| Gate | 决定允许的使用方式：direct、style-only、follow-up、clarify、hidden、summary、suppress。 |
+| Compile | 编译 prompt-safe sections，而不是把私人记忆原文塞进 prompt。 |
+| Correct | 支持 retire、delete、forget-all 和 audit export。 |
 
 ## 5 分钟 Replay
 
@@ -86,53 +86,139 @@ gate_eval: 8/8
 
 ## Replay 证明了什么
 
-Replay 会写入两轮对话：
+Replay 会写入两轮用户输入：
 
-| Turn | 含义 |
+| Turn | 记忆含义 |
 | --- | --- |
-| `我最近准备面试，有点焦虑。` | 持续事件 + 敏感情绪状态 |
-| `回答直接一点，先给结论。` | 稳定沟通偏好 |
+| `我最近准备面试，有点焦虑。` | 持续事件 + 敏感情绪状态。 |
+| `回答直接一点，先给结论。` | 稳定沟通偏好和结构偏好。 |
 
-然后测试两个不同 query：
+然后测试两个 query：
 
-| Query | 正确记忆行为 |
+| Query | 正确行为 |
 | --- | --- |
-| `面试怎么准备？` | 面试事件作为 `follow_up`；风格偏好影响回答，但不暴露原始 profile。 |
+| `面试怎么准备？` | 面试事件作为 `follow_up`；风格策略影响回答，但不暴露原始 profile facts。 |
 | `今天只帮我 review Python 代码，不用提面试。` | 面试事件被 suppress；保留风格适配；不注入直接可见记忆。 |
 
-最后模拟用户纠错：用户不想让系统记住焦虑。产品路径会同时退休敏感状态和由它推导出的 profile 信号。
+最后模拟一次纠错：用户不希望系统记住焦虑。runtime 会同时退休敏感状态和派生 profile 信号。
 
-## 指标不是装饰
+<img src="docs/assets/evolvememory-gate-replay.svg" alt="Replay 证明 gate、suppression、style continuity 和 correction" width="100%" />
 
-| 指标 | 衡量什么 | Runtime 来源 |
-| --- | --- | --- |
-| `gate_action_accuracy` | regression cases 中 memory-use action 是否符合预期 | `evals.runner.run_gate_eval` |
-| `explicit_suppression_rate` | 用户明确“不用提 X”时是否抑制匹配事件 | `MemoryUseGate` |
-| `style_continuity_rate` | 风格偏好是否能在相关和无关 query 中持续生效 | `SessionMemoryRuntime.query` |
-| `prompt_safety_rate` | no-mention query 是否没有注入直接可见记忆 | `PromptContextBuilder` |
-| `correction_retirement_rate` | 纠错是否退休敏感状态和派生 profile memory | `SessionMemoryRuntime.retire_memory` |
-| `extraction` | provider-free LLM payload 是否能正确 validate、normalize、reject | `LLMMemoryProposalExtractor` |
-| `write_decision` | 确定性写入治理是否正确 create、review、supersede、evidence-merge | `MemoryOperationPlanner` |
-| `privacy_actions` | retrieval/gating 是否抑制 sensitive 或 non-promptable memories | `MemoryUseGate` |
-| `v2_ingest` | `/v2/users/{user_id}/turns/ingest` 是否把 LLM payload 接入治理链路 | FastAPI v2 ingest |
+## Mathematical Runtime
 
-运行确定性 eval：
+EvolveMemory 把 memory 行为设计成可打分、可解释、可评估的决策链。当前规则是确定性的，
+但关键模块都会输出 factors、weights、formula、rationale 和 version，后续可以校准或用反馈数据训练。
 
-```bash
-python -m evals.runner --suite gate_eval
-python -m evals.runner --suite product_replay_eval
-python -m evals.runner --suite profile_evidence_eval
-python -m evals.runner --suite response_policy_eval
-python -m evals.runner --suite event_skill_eval
-python -m evals.runner --suite prompt_context_safety_eval
-python -m evals.runner --suite extraction_eval
-python -m evals.runner --suite write_decision_eval
-python -m evals.runner --suite retrieval_privacy_eval
-python -m evals.runner --suite v2_ingest_eval
-python -m evals.runner --suite all
+`ScoreBreakdown` 是统一解释对象：
+
+```python
+ScoreBreakdown(
+    name="retrieval",
+    score=0.81,
+    factors={"keyword": 0.5, "activation": 0.72, "semantic_gravity": 0.88},
+    weights={"keyword": 0.22, "activation": 0.14, "semantic_gravity": 0.06},
+    probability=0.81,
+    formula="S_ret-v3=...",
+    rationale=["career query depends on current work or event state"],
+    version="retrieval-v3.0",
+)
 ```
 
-## 开发者接口
+### Retrieval Score
+
+Retrieval 只负责候选排序，仍然不等于 permission。
+
+$$
+S_{ret}^{v3}
+= 0.22K + 0.22E + 0.14F + 0.14L + 0.14A + 0.08C + 0.06G
+$$
+
+| Symbol | Runtime factor | 含义 |
+| --- | --- | --- |
+| `K` | `keyword` | 与当前 query 的词面重合。 |
+| `E` | `embedding` | 用于本地测试和 demo 的确定性 embedding-like similarity。 |
+| `F` | `freshness` | 记忆的新鲜度。 |
+| `L` | `layer_prior` | 当前 query intent 是否需要这个 memory layer。 |
+| `A` | `activation` | 基于 confidence、age、recurrence、anomaly、fatigue 的 lifecycle activation。 |
+| `C` | `causal_relevance` | 这条记忆是否会改变安全或有用的回答。 |
+| `G` | `semantic_gravity` | 即使词面不重合，也具有人类语境重要性。 |
+
+### Activation And Temporal Anomaly
+
+Memory 可以被存储，但不一定应该在当前时刻影响行为。Activation 控制生命周期衰减、强化、异常放大和疲劳抑制。
+
+$$
+\log A_i(t)
+= \alpha_{\ell_i} + \log(c_i)
+- \lambda_{\ell_i}\Delta t
++ \rho\log(1+n_i)
++ \omega z_i^{anom}
+- \eta f_i
+$$
+
+<img src="assets/state_temporal_anomaly_model.svg" alt="状态时间异常模型：TTL、复发、异常分数和阶段转移" width="100%" />
+
+### Semantic Gravity
+
+Semantic gravity 避免重要生活/安全语境因为词面重合弱而丢失。失业、面试、考试、健康约束、
+关系变化、持续情绪状态，通常比普通风格偏好更影响回答策略。
+
+$$
+G_{final}
+= G_{social}
+\times \frac{1 + \alpha I_{personal}}{1 + \beta F_{fatigue}}
+$$
+
+<img src="assets/semantic_gravity_world_knowledge.svg" alt="语义重力模型：语境补全、社会文化重力和个体调制" width="100%" />
+
+### Causal Relevance
+
+Causal retrieval 问的是：这条 memory 会不会改变安全或有用的回答？
+
+例子：用户问今晚聚会能不能喝酒时，药物或过敏相关 memory 应该被召回，即使它不是最高的关键词匹配。
+但召回后仍只是 candidate；memory-use gate 决定它能否、以及如何影响回答。
+
+## Write Governance And Inference Validation
+
+LLM output 永远不是 writer of record。模型可以提出 memory proposal，但 validation 和确定性写入治理
+决定每个 candidate 是 create、reject、review、supersede，还是只 merge evidence。
+
+<img src="assets/inference_validation_engine.svg" alt="推导验证引擎：搜索验证、对话验证、静默观察三条路径" width="100%" />
+
+写入治理使用加权分数：
+
+$$
+S_{write}
+= 0.18C + 0.16R + 0.14P + 0.12T + 0.10A + 0.10E + 0.08N + 0.07U + 0.05V
+$$
+
+| Symbol | Factor |
+| --- | --- |
+| `C` | Candidate confidence. |
+| `R` | Future reuse value. |
+| `P` | Personalization gain. |
+| `T` | Temporal stability. |
+| `A` | User/source authority. |
+| `E` | Evidence quality. |
+| `N` | Novelty against existing memory. |
+| `U` | Actionability. |
+| `V` | Privacy adjustment. |
+
+## Memory-Use Gate And Prompt Safety
+
+Gate 会把排序后的候选转换为允许的 action。
+
+| Gate action | Prompt channel |
+| --- | --- |
+| `use_directly` | 只有 safe_to_mention 时才进入 direct user facts。 |
+| `style_only` | 转成 style policy，不暴露原始私人证据。 |
+| `follow_up` | 最多一个短 progress cue。 |
+| `hidden_constraint` | 内部 policy constraint，不对用户可见。 |
+| `clarify` | 使用不确定 memory 前先确认当前事实。 |
+| `summarize_only` | 只作为聚合上下文，不暴露细节。 |
+| `suppress` | 只保留 audit，不进入 prompt。 |
+
+## Developer Surface
 
 ```bash
 # 运行产品 replay
@@ -164,140 +250,82 @@ context = runtime.prompt_context("帮我 review 这段代码。", now)
 print(context["assembled_prompt"])
 ```
 
-## Phase 2 升级亮点
-
-这次升级把 EvolveMemory 从可治理 memory store 进一步推进为更完整的心智模型 runtime：
-
-| 升级点 | 变化 | Runtime / eval |
-| --- | --- | --- |
-| Provider-free LLM proposal ingest | `/v2/users/{user_id}/turns/ingest` 支持 `extractor="llm_payload"`；payload 只会变成候选。 | `app.py`, `LLMMemoryProposalExtractor`, `v2_ingest_eval` |
-| 语义级 proposal validation | LLM payload 会 normalize 空值、升级 sensitive keys、拒绝第三方混淆、校验 tags、保留 `valid_to`。 | `LLMProposalSchemaValidator`, `extraction_eval` |
-| Evidence-accumulated 心智模型 | Profile 扩展到 planning orientation、learning style、cognitive load、collaboration style、uncertainty tolerance、risk posture。 | `ProfileEvidenceExtractor`, `profile_evidence_eval` |
-| Procedural collaboration memory | 清单式规划、先举例、教练式追问、直接挑刺等显式协作指令会转成安全 policy guidance。 | `ResponsePolicyEngine`, `response_policy_eval` |
-| Response policy compiler 扩展 | Memory 现在可以影响 reasoning depth、example density、initiative、challenge level、personalization strength、follow-up budget。 | `PromptContextBuilder`, `prompt_context_safety_eval` |
-| 更多事件状态机 | Project 和 relationship event skills 加入 career、learning、life 事件，并带更严格的隐私 follow-up 规则。 | `EventSkillRegistry`, `event_skill_eval` |
-| Privacy and write evals | 确定性 suites 覆盖 extraction、write decisions、retrieval privacy、v2 ingest。 | `write_decision_eval`, `retrieval_privacy_eval` |
-
-## Provider-Free LLM Proposal Ingest
-
-Runtime 现在可以接收模型产出的 proposal payload，不需要 provider 或网络调用。LLM 边界不是 writer：payload 会先被解析成候选 `MemoryRecord`，再由确定性写入治理决定 create、merge、review、reject 或 evidence-only update。
-
-```json
-{
-  "session_id": "demo-session",
-  "role": "user",
-  "text": "回答直接一点。",
-  "options": {
-    "extractor": "llm_payload",
-    "llm_payload": {
-      "candidate_memories": [
-        {
-          "layer": "preference",
-          "key": "communication_style",
-          "value": "direct",
-          "confidence": 0.9,
-          "authority": "user_explicit",
-          "sensitivity": "personal",
-          "evidence": "回答直接一点"
-        }
-      ]
-    }
-  }
-}
-```
-
-非法 payload 返回 HTTP 422；sensitive 或 restricted candidates 仍会按策略进入 review queue。
-
-## API 形态
+## API Surface
 
 | Endpoint | 作用 |
 | --- | --- |
-| `POST /v2/users/{user_id}/turns/ingest` | 摄取用户 turn 到 normalized runtime。 |
-| `POST /v2/users/{user_id}/memory/query` | 为当前 query 检索并门控记忆。 |
+| `POST /v2/users/{user_id}/turns/ingest` | 摄取用户 turn 或 provider-free LLM proposal payload。 |
+| `POST /v2/users/{user_id}/memory/query` | 为当前 query 检索、打分并 gate memories。 |
 | `POST /v2/users/{user_id}/prompt-context` | 编译 model-ready memory context。 |
-| `GET /v2/users/{user_id}/memory/review-queue` | 查看需要确认的记忆。 |
+| `GET /v2/users/{user_id}/memory/review-queue` | 查看需要确认的 memories。 |
 | `POST /v2/users/{user_id}/memory/{memory_id}/correct` | 纠正并退休冲突 records。 |
-| `POST /v2/users/{user_id}/memory/forget-all` | 带 audit trail 清空记忆。 |
-| `GET /v2/users/{user_id}/memory/audit/export` | 导出 records、settings、events、audit data。 |
+| `POST /v2/users/{user_id}/memory/forget-all` | 带 audit trail 清空 memory。 |
+| `GET /v2/users/{user_id}/memory/audit/export` | 导出 records、settings、events 和 audit data。 |
 
-## 架构
+## Evaluation
 
-```mermaid
-flowchart LR
-  subgraph Observe["Observe and propose"]
-    A["User turn"] --> B["Turn preprocessor"]
-    B --> C["Rule / LLM proposal boundary"]
-    C --> D["Schema validation and normalization"]
-  end
+运行确定性 eval：
 
-  subgraph Govern["Write governance"]
-    D --> E["Sensitivity and contradiction checks"]
-    E --> F["Weighted write evaluator"]
-    F --> G{"Create, merge, review, reject?"}
-  end
-
-  subgraph Store["Normalized memory runtime"]
-    G --> H["Memory records"]
-    G --> I["Review queue"]
-    H --> J["Profile evidence ledger"]
-    H --> K["Event state store"]
-    H --> L["Audit log"]
-  end
-
-  subgraph Use["Use safely"]
-    M["Current query"] --> N["Intent-aware retrieval planner"]
-    H --> O["Hybrid scorer"]
-    J --> P["Mental-model compiler"]
-    K --> Q["Event follow-up policy"]
-    N --> O
-    O --> R["Memory-use gate"]
-    P --> R
-    Q --> R
-    R --> S["Response policy"]
-    S --> T["Safe prompt context"]
-  end
-
-  subgraph Improve["Govern and improve"]
-    U["Correct / delete / forget-all"] --> H
-    L --> V["Audit export"]
-    T --> W["Profile / policy / event / safety evals"]
-  end
+```bash
+python -m evals.runner --suite retrieval_math_eval
+python -m evals.runner --suite gate_eval
+python -m evals.runner --suite product_replay_eval
+python -m evals.runner --suite profile_evidence_eval
+python -m evals.runner --suite response_policy_eval
+python -m evals.runner --suite event_skill_eval
+python -m evals.runner --suite prompt_context_safety_eval
+python -m evals.runner --suite extraction_eval
+python -m evals.runner --suite write_decision_eval
+python -m evals.runner --suite retrieval_privacy_eval
+python -m evals.runner --suite v2_ingest_eval
+python -m evals.runner --suite all
 ```
 
-## 稳定能力与原型边界
-
-| 层 | 当前状态 |
+| Eval | 覆盖契约 |
 | --- | --- |
-| Rule extraction、write policy、use gate、prompt context | 当前支持的本地产品路径 |
-| FastAPI endpoints、in-memory / SQLite persistence | 支持 prototype |
-| Review queue、correction、delete、forget-all、audit export | 已实现治理 demo |
-| LLM proposal ingest | Provider-free payload parsing 已接入 v2 ingest；provider-backed extraction 仍是 prototype |
-| Benchmarks | deterministic regression/eval seeds，不是大规模 personal-memory benchmark |
+| `retrieval_math_eval` | Activation、causal relevance、semantic gravity 会影响排序。 |
+| `gate_eval` | memory-use actions 与 regression cases 预期一致。 |
+| `prompt_context_safety_eval` | Profile 和 sensitive memory 不进入 direct prompt facts。 |
+| `write_decision_eval` | Governance 正确 create、reject、review、supersede 或 evidence-merge。 |
+| `extraction_eval` | Provider-free LLM payload 可以正确 validate、normalize、reject。 |
+| `retrieval_privacy_eval` | Sensitive 或 non-promptable memories 在需要时被 suppress。 |
+| `product_replay_eval` | End-to-end replay 保持一致。 |
 
-## 适合 / 不适合
+## Stable Boundaries
+
+| Layer | 当前状态 |
+| --- | --- |
+| Rule extraction、write policy、use gate、prompt context | 支持本地产品路径。 |
+| FastAPI endpoints、JSON / SQLite persistence | 支持 prototype。 |
+| Review queue、correction、delete、forget-all、audit export | 已实现治理 demo。 |
+| LLM proposal ingest | Provider-free payload parsing 已接入 v2 ingest；provider-backed extraction 是后续工作。 |
+| Math runtime | Activation、anomaly、causal relevance、semantic gravity、retrieval-v3 scoring 是本地可解释确定性规则。 |
+| Benchmarks | 只有 deterministic regression seeds，不宣称大规模 personal-memory benchmark。 |
+
+## Fit / Non-Fit
 
 适合：
 
 | 产品 | 原因 |
 | --- | --- |
-| 个人助手 | 需要稳定风格、事件连续性和纠错路径 |
-| AI companion | 需要自然适配，但不能 creepy recall |
-| Workflow agent | 需要 memory governance、audit 和 prompt-safe context |
-| 长期会话 | 需要 stale-memory suppression 和 forget controls |
+| 个人助手 | 需要稳定风格、事件连续性和纠错路径。 |
+| AI companion | 需要自然适配，但不能生硬召回私人信息。 |
+| Workflow agent | 需要 memory governance、audit 和 prompt-safe context。 |
+| 长期会话 | 需要 stale-memory suppression 和 forget controls。 |
 
 不适合：
 
 | 产品 | 更合适 |
 | --- | --- |
-| Stateless bot | 如果输出不应适配用户，就不要加 memory |
-| Transcript search | 用搜索或 RAG |
-| 黑盒不可检查 memory | 先使用可治理 store |
-| 强监管生产记忆 | 上线前必须补 policy review、privacy review 和 red-team tests |
+| Stateless bot | 如果输出不应适配用户，就不要加 memory。 |
+| Transcript search | 用搜索或 RAG。 |
+| 黑盒不可检查 memory | 先使用可治理 store。 |
+| 强监管生产记忆 | 上线前补 policy review、privacy review、encryption、migrations 和 red-team tests。 |
 
-## 仓库结构
+## Repository Map
 
 ```text
-memory_system/   runtime、demo report、extraction、gates、retrieval、context、storage
+memory_system/   runtime、extraction、gates、retrieval math、context、storage
 evals/           extraction、write、retrieval、ingest、gate、replay 的确定性 evals
 tests/           runtime、API、persistence、correction、prompt-safety tests
 examples/        可运行 replay 和产品 walkthrough
@@ -310,10 +338,11 @@ demo.py          本地抽取 demo
 
 | 方向 | 下一步 |
 | --- | --- |
-| Evaluation | 增加 noisy multi-turn、stale memory、answer-quality、privacy stress suites |
-| Extraction | 在已接入的 payload boundary 之上增加 provider-backed extraction 和 disagreement checks |
-| Privacy | 增加 sensitive-memory red-team prompts、encryption 和 retention policy fixtures |
-| Integration | 增加 chatbot、workflow、multi-agent harness examples |
+| Calibration | 增加 Brier score、expected calibration error 和 threshold tuning。 |
+| Retrieval | 在现有 scorer contract 后接 production embeddings/vector index。 |
+| Extraction | 在已接入的 payload boundary 上增加 provider-backed extraction 和 disagreement checks。 |
+| Privacy | 增加 sensitive-memory red-team prompts、encryption、retention policy fixtures 和 migration tests。 |
+| Integration | 增加 chatbot、workflow、multi-agent harness examples。 |
 
 ## Security
 
