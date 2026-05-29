@@ -22,7 +22,10 @@
 
   <rect width="1200" height="620" rx="22" class="bg"/>
   <text x="56" y="66" class="text" font-size="32" font-weight="760">Activation is not just recency</text>
-  <text x="56" y="96" class="muted" font-size="16">Derived from memory_system/activation.py: lifecycle decay, recurrence, anomaly boost, and fatigue penalty.</text>
+  <text x="56" y="94" class="muted" font-size="16">
+    <tspan x="56" dy="0">Derived from memory_system/activation.py: lifecycle decay, recurrence, anomaly boost,</tspan>
+    <tspan x="56" dy="22">and fatigue penalty.</tspan>
+  </text>
 
   <rect x="56" y="134" width="230" height="164" rx="16" class="panel"/>
   <text x="84" y="172" class="text" font-size="20" font-weight="720">MemoryItem</text>
@@ -65,11 +68,14 @@
   <text x="190" y="436" class="text" font-size="21" font-weight="760">ActivationEngine.score()</text>
   <text x="190" y="474" class="mono" font-size="17">log_A = alpha_l + log(confidence) - lambda_l * age_days + rho * log(1 + recurrence)</text>
   <text x="190" y="506" class="mono" font-size="17">        + omega * anomaly - eta * fatigue</text>
-  <text x="190" y="536" class="muted" font-size="14">The retrieval factor A is logistic(log_A), returned as ScoreBreakdown(name="activation").</text>
+  <text x="190" y="536" class="muted" font-size="14">Retrieval factor A = logistic(log_A), returned as ScoreBreakdown(name="activation").</text>
 
   <path d="M769 314 C769 354 600 350 600 394" class="thin"/>
   <path d="M1046 314 C1046 354 800 350 800 394" class="thin"/>
 
-  <rect x="156" y="558" width="888" height="34" rx="10" class="risk"/>
-  <text x="182" y="580" class="muted" font-size="14">Purpose: a stale memory decays; a persistent or recurring volatile state can be boosted for review or careful follow-up, while fatigue lowers repeated surfacing.</text>
+  <rect x="156" y="558" width="888" height="48" rx="10" class="risk"/>
+  <text x="182" y="578" class="muted" font-size="14">
+    <tspan x="182" dy="0">Purpose: stale memory decays; persistent volatile state can be boosted for review;</tspan>
+    <tspan x="182" dy="18">fatigue lowers repeated surfacing.</tspan>
+  </text>
 </svg>

@@ -130,14 +130,36 @@ ScoreBreakdown(
 )
 ```
 
-### Retrieval Score
+Read the math runtime as one pipeline:
+
+| Stage | Question answered | Output |
+| --- | --- | --- |
+| Retrieval score | Which candidate memories should be inspected first? | Ranked candidate list. |
+| Activation | Is this memory still active at this moment? | Lifecycle-aware factor `A`. |
+| Semantic gravity | Should weak-match but high-impact context remain visible? | Impact factor `G`. |
+| Causal relevance | Would this memory change the safe or useful answer? | Dependency factor `C`. |
+| Use gate | How may ranked memories affect the prompt? | direct, style, follow-up, hidden, summary, suppress. |
+| Write governance | Can an LLM proposal become a formal memory? | create, review, merge, supersede, reject. |
+
+### 1. Retrieval Score
 
 Retrieval ranks candidates. It still does not grant permission.
 
-$$
-S_{ret}^{v3}
-= 0.22K + 0.22E + 0.14F + 0.14L + 0.14A + 0.08C + 0.06G
-$$
+```text
+S_ret_v3 = clamp(
+  0.22*K_keyword
++ 0.22*E_embedding
++ 0.14*F_freshness
++ 0.14*L_layer_prior
++ 0.14*A_activation
++ 0.08*C_causal_relevance
++ 0.06*G_semantic_gravity
+)
+```
+
+All factors are normalized to `0..1`, and the weights sum to `1.00`. The
+score answers one question only: **which candidates should be inspected
+first?** The memory-use gate still decides visibility and allowed use.
 
 | Symbol | Runtime factor | Meaning |
 | --- | --- | --- |
@@ -149,40 +171,86 @@ $$
 | `C` | `causal_relevance` | Whether the memory changes the safe or useful answer. |
 | `G` | `semantic_gravity` | Human-context importance even when wording does not match. |
 
-### Activation And Temporal Anomaly
+Retrieval-v3 is intentionally hybrid:
+
+| Layer | Why it exists |
+| --- | --- |
+| Match | `keyword` and `embedding` keep ordinary relevance strong. |
+| Lifecycle | `freshness`, `layer_prior`, and `activation` stop stale or wrong-layer memories from dominating. |
+| Impact | `causal_relevance` and `semantic_gravity` recover memories that matter even when wording is weak. |
+
+### 2. Activation And Temporal Anomaly
 
 Some memories can be stored but should not currently affect behavior. Activation
 models lifecycle decay, reinforcement, temporal anomaly, and fatigue.
 
-$$
-\log A_i(t)
-= \alpha_{\ell_i} + \log(c_i)
-- \lambda_{\ell_i}\Delta t
-+ \rho\log(1+n_i)
-+ \omega z_i^{anom}
-- \eta f_i
-$$
+```text
+log_A = base_prior[lifecycle]
+      + log(confidence)
+      - decay_per_day[lifecycle] * age_days
+      + reinforcement_weight * log(1 + recurrence_count)
+      + anomaly_weight * temporal_anomaly
+      - fatigue_weight * fatigue
+
+A_activation = sigmoid(log_A)
+```
+
+The anomaly input is derived before activation:
+
+```text
+temporal_anomaly =
+  0.50 * duration_ratio
++ 0.30 * recurrence_factor
++ 0.20 * severity_prior
+```
+
+This separates ordinary recency from persistent state risk: a normal preference
+can quietly remain long term, while a recurring volatile state can stay visible
+for careful follow-up or review.
 
 <img src="assets/state_temporal_anomaly_model.svg" alt="State temporal anomaly model with TTL, recurrence, anomaly score, and phase transitions" width="100%" />
 
-### Semantic Gravity
+### 3. Semantic Gravity
 
 Semantic gravity prevents important life or safety context from being lost just
 because lexical overlap is weak. Job loss, interviews, exams, health
 constraints, relationship transitions, and persistent emotional state can
 matter more than a generic preference.
 
-$$
-G_{final}
-= G_{social}
-\times \frac{1 + \alpha I_{personal}}{1 + \beta F_{fatigue}}
-$$
+```text
+G_social = clamp(
+  base_gravity[key_or_value]
+* cultural_context_weight
+* life_stage_modifier
+)
+
+G_final = clamp(
+  G_social
+* (1 + 0.35 * personal_importance)
+/ (1 + 0.50 * fatigue)
+)
+```
+
+Semantic gravity is not permission either. It only prevents high-impact context
+from disappearing before the use gate can decide whether it should be mentioned,
+hidden, summarized, or suppressed.
 
 <img src="assets/semantic_gravity_world_knowledge.svg" alt="Semantic gravity model with context resolution, social gravity, and individual modulation" width="100%" />
 
-### Causal Relevance
+### 4. Causal Relevance
 
 Causal retrieval asks: would this memory change the safe or useful answer?
+
+```text
+C(m, q) = rule_risk_or_dependency(m, q)
+```
+
+The current implementation is not a black-box causal model. It is an auditable
+dependency rule set: health or medication constraints score `1.00` for alcohol
+queries, career events score about `0.90` for job-search queries, and exam,
+relationship, and style queries step down through their own dependency rules.
+The goal is to lift answer-changing memories into the candidate set before the
+gate decides visibility.
 
 Example: if the user asks whether they can drink at a party, a medication or
 allergy memory should surface even when it is not the highest keyword match.
@@ -199,10 +267,24 @@ created, rejected, reviewed, superseded, or merged as evidence.
 
 Write governance uses a weighted score:
 
-$$
-S_{write}
-= 0.18C + 0.16R + 0.14P + 0.12T + 0.10A + 0.10E + 0.08N + 0.07U + 0.05V
-$$
+```text
+S_write = clamp(
+  0.18*C_confidence
++ 0.16*R_future_reuse
++ 0.14*P_personalization_gain
++ 0.12*T_temporal_stability
++ 0.10*A_user_authority
++ 0.10*E_evidence_quality
++ 0.08*N_novelty
++ 0.07*U_actionability
++ 0.05*V_privacy_adjustment
+)
+```
+
+`S_write` is only the weighted part of the decision. Hard policy checks still
+override it: disabled settings reject, explicit do-not-remember rejects,
+restricted memories require consent, low-confidence sensitive memories require
+review, and contradictions may merge, supersede, or ask the user.
 
 | Symbol | Factor |
 | --- | --- |
@@ -216,9 +298,35 @@ $$
 | `U` | Actionability. |
 | `V` | Privacy adjustment. |
 
+| Result path | Decision owner |
+| --- | --- |
+| `create` | Score passes threshold and no review policy blocks it. |
+| `review` | Sensitivity, restricted consent, low confidence, or lower authority needs user confirmation. |
+| `merge` | Duplicate evidence should attach to an existing record. |
+| `supersede` | A higher-or-equal authority candidate replaces an exclusive conflicting value. |
+| `reject` | Settings, explicit refusal, hard confidence floor, or low weighted utility blocks the write. |
+
 ## Memory-Use Gate And Prompt Safety
 
 The gate turns ranked candidates into allowed actions.
+
+```text
+S_gate = clamp(
+  0.22*query_relevance
++ 0.14*freshness
++ 0.14*authority
++ 0.16*utility
++ 0.14*privacy_safety
++ 0.08*user_preference_alignment
++ 0.06*token_efficiency
++ 0.06*contradiction_safety
+)
+```
+
+The gate is not another retrieval score. It separates usefulness from
+visibility: a high-scoring memory may still become `style_only`,
+`summarize_only`, or `suppress` because of privacy, allowed-use constraints,
+explicit suppression, or sensitive-memory policy.
 
 | Gate action | Prompt channel |
 | --- | --- |

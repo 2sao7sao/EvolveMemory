@@ -21,7 +21,10 @@
 
   <rect width="1200" height="620" rx="22" class="bg"/>
   <text x="56" y="66" class="text" font-size="32" font-weight="760">Semantic gravity keeps important context visible</text>
-  <text x="56" y="96" class="muted" font-size="16">Derived from memory_system/gravity.py: base gravity, cultural context, life-stage modifier, personal importance, fatigue.</text>
+  <text x="56" y="94" class="muted" font-size="16">
+    <tspan x="56" dy="0">Derived from memory_system/gravity.py: base gravity, cultural context, life-stage modifier,</tspan>
+    <tspan x="56" dy="22">personal importance, and fatigue.</tspan>
+  </text>
 
   <rect x="58" y="142" width="250" height="286" rx="18" class="panel"/>
   <text x="86" y="182" class="text" font-size="20" font-weight="720">Base gravity</text>
@@ -35,7 +38,11 @@
   <text x="230" y="302" class="muted" font-size="13">0.86</text>
   <text x="86" y="330" class="mono" font-size="13">breakup</text>
   <text x="230" y="330" class="muted" font-size="13">0.82</text>
-  <text x="86" y="372" class="muted" font-size="14">Low lexical overlap can still rank high when the memory changes the answer.</text>
+  <text x="86" y="362" class="muted" font-size="14">
+    <tspan x="86" dy="0">Low lexical overlap can still rank</tspan>
+    <tspan x="86" dy="22">high when the memory changes</tspan>
+    <tspan x="86" dy="22">the safe or useful answer.</tspan>
+  </text>
 
   <line x1="308" y1="286" x2="366" y2="286" class="line"/>
 
@@ -44,8 +51,12 @@
   <text x="394" y="220" class="mono" font-size="13">if "gaokao" evidence:</text>
   <text x="414" y="246" class="muted" font-size="13">exam_month_hint = June</text>
   <text x="394" y="284" class="mono" font-size="13">if value in job states:</text>
-  <text x="414" y="310" class="muted" font-size="13">context_weight = labor-market</text>
-  <text x="394" y="354" class="muted" font-size="14">Returns ContextResolution with inferred attributes and rationale.</text>
+  <text x="414" y="310" class="muted" font-size="13">context_weight = labor</text>
+  <text x="414" y="334" class="muted" font-size="13">market sensitive</text>
+  <text x="394" y="372" class="muted" font-size="14">
+    <tspan x="394" dy="0">Returns ContextResolution with</tspan>
+    <tspan x="394" dy="22">attributes and rationale.</tspan>
+  </text>
 
   <line x1="616" y1="286" x2="674" y2="286" class="line"/>
 
@@ -71,6 +82,9 @@
 
   <rect x="206" y="484" width="788" height="82" rx="18" class="panel"/>
   <text x="238" y="518" class="text" font-size="19" font-weight="720">Retrieval use</text>
-  <text x="238" y="548" class="muted" font-size="15">The retrieval-v3 factor G helps rank high-impact memories, but the memory-use gate still decides whether the memory may be mentioned, hidden, summarized, or suppressed.</text>
+  <text x="238" y="542" class="muted" font-size="15">
+    <tspan x="238" dy="0">The retrieval-v3 factor G helps rank high-impact memories, but the memory-use gate still</tspan>
+    <tspan x="238" dy="22">decides whether the memory may be mentioned, hidden, summarized, or suppressed.</tspan>
+  </text>
   <path d="M1062 428 C1062 470 994 486 994 522" class="softline"/>
 </svg>

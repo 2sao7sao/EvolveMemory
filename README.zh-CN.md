@@ -124,14 +124,35 @@ ScoreBreakdown(
 )
 ```
 
-### Retrieval Score
+这套数学建模按一条流水线阅读：
+
+| 阶段 | 解决的问题 | 产物 |
+| --- | --- | --- |
+| Retrieval score | 候选记忆先看哪几条。 | 排序后的 candidate list。 |
+| Activation | 这条记忆此刻是否仍然活跃。 | lifecycle-aware factor `A`。 |
+| Semantic gravity | 词面不强但人类语境重要的记忆是否应被保留。 | impact factor `G`。 |
+| Causal relevance | 这条记忆会不会改变安全或有用的回答。 | dependency factor `C`。 |
+| Use gate | 排序后的记忆可以如何影响 prompt。 | direct、style、follow-up、hidden、summary、suppress。 |
+| Write governance | LLM proposal 能不能成为正式记忆。 | create、review、merge、supersede、reject。 |
+
+### 一、Retrieval Score
 
 Retrieval 只负责候选排序，仍然不等于 permission。
 
-$$
-S_{ret}^{v3}
-= 0.22K + 0.22E + 0.14F + 0.14L + 0.14A + 0.08C + 0.06G
-$$
+```text
+S_ret_v3 = clamp(
+  0.22*K_keyword
++ 0.22*E_embedding
++ 0.14*F_freshness
++ 0.14*L_layer_prior
++ 0.14*A_activation
++ 0.08*C_causal_relevance
++ 0.06*G_semantic_gravity
+)
+```
+
+所有因子都归一到 `0..1`，权重和为 `1.00`。这个分数只回答一个问题：
+**哪些候选记忆应该优先被检查？** 记忆能否进入回答、以什么方式进入，仍然由 memory-use gate 决定。
 
 | Symbol | Runtime factor | 含义 |
 | --- | --- | --- |
@@ -143,37 +164,78 @@ $$
 | `C` | `causal_relevance` | 这条记忆是否会改变安全或有用的回答。 |
 | `G` | `semantic_gravity` | 即使词面不重合，也具有人类语境重要性。 |
 
-### Activation And Temporal Anomaly
+Retrieval-v3 故意拆成三层：
+
+| Layer | 设计原因 |
+| --- | --- |
+| Match | `keyword` 和 `embedding` 保证普通相关性仍然有效。 |
+| Lifecycle | `freshness`、`layer_prior`、`activation` 防止过期或错层记忆压过当前任务。 |
+| Impact | `causal_relevance` 和 `semantic_gravity` 补回词面弱但会改变回答策略的记忆。 |
+
+### 二、Activation And Temporal Anomaly
 
 Memory 可以被存储，但不一定应该在当前时刻影响行为。Activation 控制生命周期衰减、强化、异常放大和疲劳抑制。
 
-$$
-\log A_i(t)
-= \alpha_{\ell_i} + \log(c_i)
-- \lambda_{\ell_i}\Delta t
-+ \rho\log(1+n_i)
-+ \omega z_i^{anom}
-- \eta f_i
-$$
+```text
+log_A = base_prior[lifecycle]
+      + log(confidence)
+      - decay_per_day[lifecycle] * age_days
+      + reinforcement_weight * log(1 + recurrence_count)
+      + anomaly_weight * temporal_anomaly
+      - fatigue_weight * fatigue
+
+A_activation = sigmoid(log_A)
+```
+
+异常分数先单独计算，再进入 activation：
+
+```text
+temporal_anomaly =
+  0.50 * duration_ratio
++ 0.30 * recurrence_factor
++ 0.20 * severity_prior
+```
+
+这样 recency 和状态风险不会混在一起：普通偏好可以长期安静存在，反复出现的流动状态会在必要时保持可见，
+用于谨慎 follow-up 或 review。
 
 <img src="assets/state_temporal_anomaly_model.svg" alt="状态时间异常模型：TTL、复发、异常分数和阶段转移" width="100%" />
 
-### Semantic Gravity
+### 三、Semantic Gravity
 
 Semantic gravity 避免重要生活/安全语境因为词面重合弱而丢失。失业、面试、考试、健康约束、
 关系变化、持续情绪状态，通常比普通风格偏好更影响回答策略。
 
-$$
-G_{final}
-= G_{social}
-\times \frac{1 + \alpha I_{personal}}{1 + \beta F_{fatigue}}
-$$
+```text
+G_social = clamp(
+  base_gravity[key_or_value]
+* cultural_context_weight
+* life_stage_modifier
+)
+
+G_final = clamp(
+  G_social
+* (1 + 0.35 * personal_importance)
+/ (1 + 0.50 * fatigue)
+)
+```
+
+Semantic gravity 也不是 permission。它只保证高影响语境不会在进入 gate 之前丢失；最终是 mention、
+hidden、summary 还是 suppress，仍然由 use gate 决定。
 
 <img src="assets/semantic_gravity_world_knowledge.svg" alt="语义重力模型：语境补全、社会文化重力和个体调制" width="100%" />
 
-### Causal Relevance
+### 四、Causal Relevance
 
 Causal retrieval 问的是：这条 memory 会不会改变安全或有用的回答？
+
+```text
+C(m, q) = rule_risk_or_dependency(m, q)
+```
+
+当前实现不是黑盒因果模型，而是可审计的规则依赖：健康/药物约束遇到喝酒问题为 `1.00`，
+职业事件遇到求职问题约为 `0.90`，考试、关系、风格类 query 会按各自依赖降级。这样做的目标是先把
+“会改变回答安全性或实用性”的记忆抬上来，再交给 gate 控制可见性。
 
 例子：用户问今晚聚会能不能喝酒时，药物或过敏相关 memory 应该被召回，即使它不是最高的关键词匹配。
 但召回后仍只是 candidate；memory-use gate 决定它能否、以及如何影响回答。
@@ -187,10 +249,23 @@ LLM output 永远不是 writer of record。模型可以提出 memory proposal，
 
 写入治理使用加权分数：
 
-$$
-S_{write}
-= 0.18C + 0.16R + 0.14P + 0.12T + 0.10A + 0.10E + 0.08N + 0.07U + 0.05V
-$$
+```text
+S_write = clamp(
+  0.18*C_confidence
++ 0.16*R_future_reuse
++ 0.14*P_personalization_gain
++ 0.12*T_temporal_stability
++ 0.10*A_user_authority
++ 0.10*E_evidence_quality
++ 0.08*N_novelty
++ 0.07*U_actionability
++ 0.05*V_privacy_adjustment
+)
+```
+
+`S_write` 只是决策里的加权部分。硬策略仍然优先：settings 禁用会 reject，明确 `do_not_remember`
+会 reject，restricted memory 需要 consent，低置信 sensitive memory 需要 review，冲突记录会进入
+merge、supersede 或 ask-user-confirmation。
 
 | Symbol | Factor |
 | --- | --- |
@@ -204,9 +279,33 @@ $$
 | `U` | Actionability. |
 | `V` | Privacy adjustment. |
 
+| Result path | 决策来源 |
+| --- | --- |
+| `create` | 分数过阈值，且没有 review policy 阻挡。 |
+| `review` | sensitivity、restricted consent、低置信度或低 authority 需要用户确认。 |
+| `merge` | 重复 memory 只追加 evidence，不创建新 record。 |
+| `supersede` | 更高或同等 authority 的 candidate 可以替换 exclusive 冲突值。 |
+| `reject` | settings、明确拒绝、硬置信度下限或低加权收益阻止写入。 |
+
 ## Memory-Use Gate And Prompt Safety
 
 Gate 会把排序后的候选转换为允许的 action。
+
+```text
+S_gate = clamp(
+  0.22*query_relevance
++ 0.14*freshness
++ 0.14*authority
++ 0.16*utility
++ 0.14*privacy_safety
++ 0.08*user_preference_alignment
++ 0.06*token_efficiency
++ 0.06*contradiction_safety
+)
+```
+
+Gate 的核心不是再排序一次，而是把“可用性”和“可见性”分开：高分记忆也可能因为 privacy、allowed_use、
+用户显式 suppression 或 sensitive policy 只能进入 `style_only`、`summarize_only`，甚至 `suppress`。
 
 | Gate action | Prompt channel |
 | --- | --- |
