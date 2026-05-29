@@ -4,8 +4,10 @@
 **Target project:** `2sao7sao/EvolveMemory`  
 **Recommended repository path:** `docs/phase2-optimization-spec.md`  
 **Date:** 2026-05-01  
-**Status:** Draft for Phase 2 development  
+**Status:** Draft for Phase 2 development; implementation is now partially complete in the runtime.  
 **Primary goal:** 将 EvolveMemory 从规则型 memory prototype 升级为可评测、可扩展、可治理、可集成的个人 AI memory runtime。
+
+> Implementation status, 2026-05-29: normalized v2 storage, write governance, memory-use gate, response policy, event skills, mental-model profile evidence, provider-free LLM proposal ingest, and deterministic eval suites are implemented. Provider-backed extraction, production embedding/vector indexes, encryption, migrations, and broad answer-quality evals remain roadmap slices.
 
 ---
 
@@ -48,7 +50,7 @@ observe
 
 Phase 2 应该重点解决 7 个问题：
 
-1. **Extraction 从规则升级到 LLM + schema validation + deterministic post-processing。**
+1. **Extraction 从规则升级到 LLM + schema validation + deterministic post-processing。** Provider-free LLM proposal payload ingest 已接入 v2 API；provider-backed 调用仍是后续工作。
 2. **Retrieval 从 keyword/rule 升级到 hybrid retrieval：keyword + embedding + temporal + graph + rerank。**
 3. **Memory item 从 flat record 升级到 canonical memory + evidence + audit + operation log。**
 4. **Event memory 从 label 升级到 event state machine。**
@@ -2249,31 +2251,35 @@ hallucinated_memory_rate
 
 ### 21.5 Eval Runner
 
-Command:
+Current deterministic local commands:
 
 ```bash
-python -m evals.run \
-  --suite extraction_eval \
-  --config configs/eval.local.yaml
+python -m evals.runner --suite gate_eval
+python -m evals.runner --suite product_replay_eval
+python -m evals.runner --suite profile_evidence_eval
+python -m evals.runner --suite response_policy_eval
+python -m evals.runner --suite event_skill_eval
+python -m evals.runner --suite prompt_context_safety_eval
+python -m evals.runner --suite extraction_eval
+python -m evals.runner --suite write_decision_eval
+python -m evals.runner --suite retrieval_privacy_eval
+python -m evals.runner --suite v2_ingest_eval
+python -m evals.runner --suite all
 ```
 
-Output:
+Output shape:
 
 ```json
 {
   "suite": "extraction_eval",
-  "run_id": "eval_20260501_001",
   "metrics": {
-    "slot_f1": 0.84,
-    "value_accuracy": 0.81,
-    "sensitivity_accuracy": 0.93
-  },
-  "failures": [
-    {
-      "case_id": "privacy_007",
-      "reason": "Extracted third-party fact as user fact"
+    "extraction": {
+      "correct": 6,
+      "total": 6,
+      "accuracy": 1.0
     }
-  ]
+  },
+  "failures": []
 }
 ```
 

@@ -4,24 +4,32 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from zoneinfo import ZoneInfo
 
-from evals.metrics import AccuracyMetric
+from evals.metrics import AccuracyMetric, PrecisionRecallF1Metric, RateMetric
 from memory_system import (
+    Authority,
     ContextCompiler,
     DialogueMemoryExtractor,
     EventSkillRegistry,
+    LLMMemoryProposalExtractor,
+    LLMProposalValidationError,
     MemoryItem,
     MemoryLayer,
+    MemoryOperationPlanner,
     MemoryRecord,
     MemoryType,
     MemoryUseGate,
+    NormalizedSQLiteMemoryRepository,
     ProfileAccumulator,
     ProfileEvidenceExtractor,
     ProfileInferencer,
     ResponsePolicyEngine,
     RuleMemoryProposalExtractor,
+    Sensitivity,
     TurnPreprocessor,
+    WritePolicyContext,
 )
 from memory_system.engine import MemoryStore
 
@@ -198,8 +206,173 @@ def run_prompt_context_safety_eval(cases_dir: Path = DEFAULT_CASES_DIR) -> dict[
     return {"suite": "prompt_context_safety_eval", "metrics": {"prompt_context_safety": metric.to_dict()}, "failures": failures}
 
 
+def run_extraction_eval(cases_dir: Path = DEFAULT_CASES_DIR) -> dict[str, object]:
+    tz = ZoneInfo("Asia/Shanghai")
+    metric = AccuracyMetric()
+    failures: list[dict[str, object]] = []
+    extractor = LLMMemoryProposalExtractor()
+    for case in _read_jsonl(cases_dir / "extraction_eval.jsonl"):
+        turn = TurnPreprocessor().preprocess(
+            text=case["turn"],
+            timestamp=datetime(2026, 5, 1, 9, 0, tzinfo=tz),
+            turn_id=f"{case['id']}:turn_1",
+        )
+        try:
+            records = extractor.parse_response_payload(case["payload"], turn=turn, user_id="eval-user")
+            errored = False
+        except LLMProposalValidationError as exc:
+            records = []
+            errored = True
+            error = str(exc)
+        expected_error = case.get("expect_error", False)
+        metric.add(expected_error, errored)
+        if expected_error != errored:
+            failures.append({"case_id": case["id"], "expected_error": expected_error, "actual_error": errored, "error": locals().get("error")})
+            continue
+        expected_keys = set(case.get("expected_keys", []))
+        actual_keys = {record.key for record in records}
+        for key in expected_keys:
+            passed = key in actual_keys
+            metric.add(True, passed)
+            if not passed:
+                failures.append({"case_id": case["id"], "expected_key": key, "actual_keys": sorted(actual_keys)})
+        for key, expected in case.get("expected_sensitivity", {}).items():
+            actual = next((record.sensitivity.value for record in records if record.key == key), None)
+            metric.add(expected, actual)
+            if actual != expected:
+                failures.append({"case_id": case["id"], "key": key, "expected_sensitivity": expected, "actual": actual})
+        if "expected_count" in case:
+            metric.add(case["expected_count"], len(records))
+            if len(records) != case["expected_count"]:
+                failures.append({"case_id": case["id"], "expected_count": case["expected_count"], "actual_count": len(records)})
+    return {"suite": "extraction_eval", "metrics": {"extraction": metric.to_dict()}, "failures": failures}
+
+
+def run_write_decision_eval(cases_dir: Path = DEFAULT_CASES_DIR) -> dict[str, object]:
+    metric = AccuracyMetric()
+    failures: list[dict[str, object]] = []
+    timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    for case in _read_jsonl(cases_dir / "write_decision_eval.jsonl"):
+        existing = [_record_from_case(item, timestamp=timestamp) for item in case.get("existing", [])]
+        candidates = [_record_from_case(item, timestamp=timestamp) for item in case["candidates"]]
+        operations = MemoryOperationPlanner().plan(
+            candidates,
+            existing,
+            WritePolicyContext(user_command=case.get("user_command")),
+        )
+        actual = [operation.operation.value for operation in operations]
+        expected = case["expected_operations"]
+        metric.add(expected, actual)
+        if actual != expected:
+            failures.append({"case_id": case["id"], "expected": expected, "actual": actual})
+    return {"suite": "write_decision_eval", "metrics": {"write_decision": metric.to_dict()}, "failures": failures}
+
+
+def run_retrieval_privacy_eval(cases_dir: Path = DEFAULT_CASES_DIR) -> dict[str, object]:
+    metric = PrecisionRecallF1Metric()
+    failures: list[dict[str, object]] = []
+    timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    for case in _read_jsonl(cases_dir / "retrieval_privacy_eval.jsonl"):
+        memories = [
+            MemoryItem(
+                memory_type=MemoryType(item["type"]),
+                key=item["key"],
+                value=item["value"],
+                confidence=item.get("confidence", 0.86),
+                source="eval",
+                evidence=item.get("evidence", item["key"]),
+                valid_from=timestamp,
+                tags=item.get("tags", []),
+                allowed_use=item.get("allowed_use", []),
+                sensitivity=item.get("sensitivity", "personal"),
+            )
+            for item in case["memories"]
+        ]
+        result = MemoryUseGate().select(case["query"], memories, now=timestamp)
+        selected = {decision.memory.key: decision.action.value for decision in result.decisions}
+        selected.update({decision.memory.key: decision.action.value for decision in result.suppressed})
+        for key, expected_action in case["expected_actions"].items():
+            actual = selected.get(key)
+            metric.add(expected=True, actual=actual == expected_action)
+            if actual != expected_action:
+                failures.append({"case_id": case["id"], "key": key, "expected": expected_action, "actual": actual})
+    return {"suite": "retrieval_privacy_eval", "metrics": {"privacy_actions": metric.to_dict()}, "failures": failures}
+
+
+def run_v2_ingest_eval(cases_dir: Path = DEFAULT_CASES_DIR) -> dict[str, object]:
+    metric = RateMetric()
+    failures: list[dict[str, object]] = []
+    timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    with TemporaryDirectory() as tmpdir:
+        repository = NormalizedSQLiteMemoryRepository(Path(tmpdir) / "eval.sqlite3")
+        extractor = LLMMemoryProposalExtractor()
+        for case in _read_jsonl(cases_dir / "v2_ingest_eval.jsonl"):
+            turn = TurnPreprocessor().preprocess(
+                text=case["turn"],
+                timestamp=timestamp,
+                turn_id=f"{case['id']}:turn_1",
+            )
+            try:
+                candidates = extractor.parse_response_payload(
+                    case["payload"],
+                    turn=turn,
+                    user_id=case["user_id"],
+                    session_id=case.get("session_id"),
+                )
+                operations = MemoryOperationPlanner().plan(
+                    candidates,
+                    repository.list_records(user_id=case["user_id"], session_id=case.get("session_id")),
+                    WritePolicyContext(settings=repository.get_user_settings(case["user_id"])),
+                )
+                persisted = repository.apply_operations(operations, created_at=timestamp)
+                actual_operations = [operation.operation.value for operation in operations]
+                passed = actual_operations == case["expected_operations"] and len(persisted) == case.get("expected_persisted", len(persisted))
+            except LLMProposalValidationError:
+                actual_operations = []
+                persisted = []
+                passed = case.get("expect_error", False)
+            metric.add(passed)
+            if not passed:
+                failures.append({"case_id": case["id"], "expected_operations": case.get("expected_operations"), "actual_operations": actual_operations, "persisted": len(persisted)})
+    return {"suite": "v2_ingest_eval", "metrics": {"v2_ingest": metric.to_dict("pass_rate")}, "failures": failures}
+
+
+def _record_from_case(item: dict[str, object], *, timestamp: datetime) -> MemoryRecord:
+    return MemoryRecord(
+        user_id=str(item.get("user_id", "eval-user")),
+        session_id=item.get("session_id") if isinstance(item.get("session_id"), str) else None,
+        layer=MemoryLayer(str(item.get("layer", MemoryLayer.SEMANTIC_FACT.value))),
+        key=str(item["key"]),
+        value=item["value"],
+        normalized_value=item.get("normalized_value", item["value"]),
+        confidence=float(item.get("confidence", 0.86)),
+        authority=Authority(str(item.get("authority", Authority.USER_EXPLICIT.value))),
+        sensitivity=Sensitivity(str(item.get("sensitivity", Sensitivity.PERSONAL.value))),
+        valid_from=timestamp,
+        observed_at=timestamp,
+        exclusive_group=item.get("exclusive_group") if isinstance(item.get("exclusive_group"), str) else None,
+        coexistence_rule=str(item.get("coexistence_rule", "coexist")),
+        tags=list(item.get("tags", [])),
+        metadata={"evidence": str(item.get("evidence", item["value"]))},
+    )
+
+
 def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+SUITES = {
+    "gate_eval": run_gate_eval,
+    "product_replay_eval": lambda _cases_dir: run_product_replay_eval(),
+    "profile_evidence_eval": run_profile_evidence_eval,
+    "response_policy_eval": run_response_policy_eval,
+    "event_skill_eval": run_event_skill_eval,
+    "prompt_context_safety_eval": run_prompt_context_safety_eval,
+    "extraction_eval": run_extraction_eval,
+    "write_decision_eval": run_write_decision_eval,
+    "retrieval_privacy_eval": run_retrieval_privacy_eval,
+    "v2_ingest_eval": run_v2_ingest_eval,
+}
 
 
 def main() -> None:
@@ -207,31 +380,28 @@ def main() -> None:
     parser.add_argument(
         "--suite",
         default="gate_eval",
-        choices=[
-            "gate_eval",
-            "product_replay_eval",
-            "profile_evidence_eval",
-            "response_policy_eval",
-            "event_skill_eval",
-            "prompt_context_safety_eval",
-        ],
+        choices=[*SUITES.keys(), "all"],
     )
     parser.add_argument("--cases-dir", default=str(DEFAULT_CASES_DIR))
     args = parser.parse_args()
-    if args.suite == "gate_eval":
-        result = run_gate_eval(Path(args.cases_dir))
-    elif args.suite == "product_replay_eval":
-        result = run_product_replay_eval()
-    elif args.suite == "profile_evidence_eval":
-        result = run_profile_evidence_eval(Path(args.cases_dir))
-    elif args.suite == "response_policy_eval":
-        result = run_response_policy_eval(Path(args.cases_dir))
-    elif args.suite == "event_skill_eval":
-        result = run_event_skill_eval(Path(args.cases_dir))
-    elif args.suite == "prompt_context_safety_eval":
-        result = run_prompt_context_safety_eval(Path(args.cases_dir))
+    cases_dir = Path(args.cases_dir)
+    if args.suite == "all":
+        result = {
+            "suite": "all",
+            "metrics": {},
+            "failures": [],
+            "suites": [runner(cases_dir) for runner in SUITES.values()],
+        }
+        result["metrics"] = {
+            suite["suite"]: suite["metrics"] for suite in result["suites"]
+        }
+        result["failures"] = [
+            failure
+            for suite in result["suites"]
+            for failure in suite["failures"]
+        ]
     else:
-        raise ValueError(f"Unsupported suite: {args.suite}")
+        result = SUITES[args.suite](cases_dir)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if result["failures"]:
         raise SystemExit(1)

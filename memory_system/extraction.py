@@ -218,6 +218,8 @@ class LLMMemoryProposalExtractor:
         user_id: str,
         session_id: str | None = None,
     ) -> list[MemoryRecord]:
+        if turn.memory_command in {MemoryCommand.DO_NOT_REMEMBER, MemoryCommand.FORGET}:
+            return []
         validated = LLMProposalSchemaValidator().repair_and_validate(payload)
         return [
             self._record_from_candidate(candidate, turn=turn, user_id=user_id, session_id=session_id)
@@ -245,7 +247,7 @@ class LLMMemoryProposalExtractor:
             source_turn_ids=[turn.turn_id],
             source_text_hash=turn.text_hash,
             valid_from=turn.timestamp,
-            valid_to=None,
+            valid_to=candidate.get("valid_to"),
             observed_at=turn.timestamp,
             exclusive_group=candidate.get("exclusive_group"),
             coexistence_rule=candidate.get("coexistence_rule", "coexist"),
@@ -307,6 +309,11 @@ class LLMProposalSchemaValidator:
                                 ]
                             },
                             "tags": {"type": "array", "items": {"type": "string"}},
+                            "validity": {
+                                "type": "object",
+                                "properties": {"valid_to": {"type": "string"}},
+                            },
+                            "valid_to": {"type": "string"},
                         },
                     },
                 }
@@ -316,6 +323,8 @@ class LLMProposalSchemaValidator:
     def repair_and_validate(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise LLMProposalValidationError("LLM proposal payload must be an object.")
+        if self._payload_declines_memory(payload):
+            return {"candidate_memories": []}
         raw_candidates = payload.get("candidate_memories", payload.get("memories", []))
         if not isinstance(raw_candidates, list):
             raise LLMProposalValidationError("candidate_memories must be a list.")
@@ -339,10 +348,13 @@ class LLMProposalSchemaValidator:
         self._ensure_enum(repaired["layer"], MemoryLayer, "layer")
         self._ensure_enum(repaired["authority"], Authority, "authority")
         self._ensure_enum(repaired["sensitivity"], Sensitivity, "sensitivity")
-        if not str(repaired["key"]).strip():
+        repaired["key"] = str(repaired["key"]).strip()
+        if not repaired["key"]:
             raise LLMProposalValidationError("candidate key cannot be empty.")
         if not str(repaired["evidence"]).strip():
             raise LLMProposalValidationError("candidate evidence cannot be empty.")
+        if self._is_third_party_fact(repaired):
+            raise LLMProposalValidationError("candidate appears to describe a third party, not the user.")
         if repaired["coexistence_rule"] not in {
             "coexist",
             "mutually_exclusive",
@@ -350,15 +362,119 @@ class LLMProposalSchemaValidator:
             "mergeable",
         }:
             repaired["coexistence_rule"] = "coexist"
-        repaired["key"] = str(repaired["key"]).strip()
-        repaired["tags"] = list(repaired.get("tags", []))
+        repaired["normalized_value"] = self._normalized_value(repaired)
+        repaired["tags"] = self._tags(repaired.get("tags", []))
+        repaired["sensitivity"] = self._normalized_sensitivity(repaired)
+        valid_to = self._valid_to(repaired)
+        if valid_to is not None:
+            repaired["valid_to"] = valid_to
         return repaired
+
+    def _payload_declines_memory(self, payload: dict[str, Any]) -> bool:
+        command = str(payload.get("memory_command", payload.get("command", ""))).lower()
+        if command in {MemoryCommand.DO_NOT_REMEMBER.value, MemoryCommand.FORGET.value, "forget"}:
+            return True
+        decision = str(payload.get("decision", payload.get("action", ""))).lower()
+        return decision in {"do_not_remember", "forget", "no_memory", "no_candidates"}
 
     def _confidence(self, value: object) -> float:
         try:
             return max(0.0, min(1.0, float(value)))
         except (TypeError, ValueError) as exc:
             raise LLMProposalValidationError("candidate confidence must be numeric.") from exc
+
+    def _normalized_value(self, candidate: dict[str, Any]) -> object:
+        normalized = candidate.get("normalized_value")
+        if normalized is None or (isinstance(normalized, str) and not normalized.strip()):
+            return candidate["value"]
+        return normalized
+
+    def _tags(self, value: object) -> list[str]:
+        if not isinstance(value, list):
+            raise LLMProposalValidationError("candidate tags must be a list of non-empty strings.")
+        tags: list[str] = []
+        for tag in value:
+            if not isinstance(tag, str) or not tag.strip():
+                raise LLMProposalValidationError("candidate tags must be non-empty strings.")
+            tags.append(tag.strip())
+        return tags
+
+    def _normalized_sensitivity(self, candidate: dict[str, Any]) -> str:
+        requested = Sensitivity(str(candidate["sensitivity"]))
+        minimum = SensitivityClassifier().classify(
+            MemoryRecord(
+                user_id="validator",
+                layer=MemoryLayer(candidate["layer"]),
+                key=candidate["key"],
+                value=candidate["value"],
+                normalized_value=candidate["normalized_value"],
+                confidence=candidate["confidence"],
+                authority=Authority(candidate["authority"]),
+                sensitivity=requested,
+                valid_from=datetime.now(),
+                observed_at=datetime.now(),
+                tags=list(candidate["tags"]),
+            ),
+            str(candidate.get("evidence", "")),
+        )
+        return max([requested, minimum], key=self._sensitivity_rank).value
+
+    def _sensitivity_rank(self, value: Sensitivity) -> int:
+        return {
+            Sensitivity.PUBLIC: 0,
+            Sensitivity.PERSONAL: 1,
+            Sensitivity.SENSITIVE: 2,
+            Sensitivity.RESTRICTED: 3,
+        }[value]
+
+    def _valid_to(self, candidate: dict[str, Any]) -> datetime | None:
+        raw_valid_to = candidate.get("valid_to")
+        validity = candidate.get("validity")
+        if raw_valid_to is None and isinstance(validity, dict):
+            raw_valid_to = validity.get("valid_to")
+        if raw_valid_to in {None, ""}:
+            return None
+        if isinstance(raw_valid_to, datetime):
+            return raw_valid_to
+        if isinstance(raw_valid_to, str):
+            try:
+                return datetime.fromisoformat(raw_valid_to)
+            except ValueError as exc:
+                raise LLMProposalValidationError(f"invalid valid_to datetime: {raw_valid_to}") from exc
+        raise LLMProposalValidationError("valid_to must be an ISO datetime string.")
+
+    def _is_third_party_fact(self, candidate: dict[str, Any]) -> bool:
+        evidence = str(candidate.get("evidence", "")).lower()
+        key = candidate["key"]
+        first_person_markers = ("我", "我的", "本人", "自己", "i ", "i'm", "my ", "me ")
+        third_party_markers = (
+            "朋友",
+            "同事",
+            "伴侣",
+            "男朋友",
+            "女朋友",
+            "partner",
+            "friend",
+            "colleague",
+            "coworker",
+            "he ",
+            "she ",
+            "his ",
+            "her ",
+        )
+        if not any(marker in evidence for marker in third_party_markers):
+            return False
+        user_self_phrases = ("我自己", "我本人", "my own", "myself")
+        if any(marker in evidence for marker in first_person_markers) and not any(
+            marker in evidence for marker in user_self_phrases
+        ):
+            return any(marker in evidence for marker in third_party_markers)
+        return key in SensitivityClassifier.SENSITIVE_KEYS or key in {
+            "profession",
+            "work_status",
+            "current_bandwidth",
+            "life_event",
+        }
 
     def _ensure_enum(self, value: object, enum_cls: type[Enum], field_name: str) -> None:
         try:

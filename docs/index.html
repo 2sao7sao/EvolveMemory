@@ -87,21 +87,21 @@
       </header>
 
       <section class="metrics">
-        <div class="metric"><span>Tests</span><strong>54 passed</strong></div>
-        <div class="metric"><span>Gate eval</span><strong>8 / 8</strong></div>
-        <div class="metric"><span>Suppression</span><strong>1 / 1</strong></div>
-        <div class="metric"><span>Correction</span><strong>2 / 2</strong></div>
+        <div class="metric"><span>CI</span><strong>tests + evals</strong></div>
+        <div class="metric"><span>Eval suites</span><strong>10 local</strong></div>
+        <div class="metric"><span>LLM ingest</span><strong>provider-free</strong></div>
+        <div class="metric"><span>Gate</span><strong>permissioned use</strong></div>
       </section>
 
       <section class="section grid two">
         <div class="panel">
           <h2>What makes it different?</h2>
-          <p>EvolveMemory does not just inject retrieved facts into prompts. It turns memory into a control layer: direct use, style-only, follow-up, summarize-only, hidden constraint, clarify, or suppress.</p>
+          <p>EvolveMemory does not just inject retrieved facts into prompts. It turns memory into a control layer: direct use, style-only, follow-up, summarize-only, hidden constraint, clarify, or suppress. Retrieval is not permission.</p>
         </div>
         <div class="panel">
-          <h2>Run the replay</h2>
-          <p>The replay shows event follow-up, style-only adaptation, explicit suppression, prompt safety, and correction retirement.</p>
-          <code>python -m memory_system.demo</code>
+          <h2>LLM proposal ingest</h2>
+          <p>The v2 ingest API accepts provider-free <code>llm_payload</code> proposals. They are validated, normalized, privacy-checked, and then routed through deterministic write governance before anything is stored.</p>
+          <code>extractor: "llm_payload"</code>
         </div>
       </section>
 
@@ -119,6 +119,10 @@
             <tr><td>style_continuity_rate</td><td>Did preferences still shape answers without exposing facts?</td></tr>
             <tr><td>prompt_safety_rate</td><td>Was direct visible memory omitted for the no-mention query?</td></tr>
             <tr><td>correction_retirement_rate</td><td>Did correction retire sensitive state and derived profile memory?</td></tr>
+            <tr><td>extraction_eval</td><td>Did LLM payload validation normalize valid proposals and reject unsafe ones?</td></tr>
+            <tr><td>write_decision_eval</td><td>Did write governance choose create, review, supersede, or evidence-only correctly?</td></tr>
+            <tr><td>retrieval_privacy_eval</td><td>Did the gate suppress sensitive or non-promptable memory when needed?</td></tr>
+            <tr><td>v2_ingest_eval</td><td>Did API ingest route LLM payload candidates through deterministic governance?</td></tr>
           </tbody>
         </table>
       </section>

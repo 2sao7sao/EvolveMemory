@@ -19,6 +19,7 @@ from memory_system import (
     HybridMemoryScorer,
     LLMMemoryProposalExtractor,
     LLMProposalSchemaValidator,
+    LLMProposalValidationError,
     MemoryCommand,
     MemoryCommandDetector,
     MemoryItem,
@@ -387,6 +388,104 @@ class MemorySystemTest(unittest.TestCase):
         self.assertEqual(validated["candidate_memories"][0]["confidence"], 1.0)
         self.assertEqual(records[0].layer, MemoryLayer.EPISODIC_EVENT)
         self.assertEqual(records[0].metadata["extractor_version"], "llm-proposal-v0")
+
+    def test_llm_proposal_validator_rejects_invalid_tags(self) -> None:
+        payload = {
+            "candidate_memories": [
+                {
+                    "layer": "preference",
+                    "key": "communication_style",
+                    "value": "direct",
+                    "confidence": 0.86,
+                    "authority": "assistant_inferred",
+                    "sensitivity": "personal",
+                    "evidence": "回答直接一点",
+                    "tags": [""],
+                }
+            ]
+        }
+
+        with self.assertRaises(LLMProposalValidationError):
+            LLMProposalSchemaValidator().repair_and_validate(payload)
+
+    def test_llm_proposal_validator_rejects_third_party_confusion(self) -> None:
+        payload = {
+            "candidate_memories": [
+                {
+                    "layer": "semantic_fact",
+                    "key": "relationship_status",
+                    "value": "single",
+                    "confidence": 0.86,
+                    "authority": "assistant_inferred",
+                    "sensitivity": "personal",
+                    "evidence": "朋友现在单身",
+                }
+            ]
+        }
+
+        with self.assertRaises(LLMProposalValidationError):
+            LLMProposalSchemaValidator().repair_and_validate(payload)
+
+    def test_llm_proposal_validator_upgrades_sensitivity_and_preserves_valid_to(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        turn = TurnPreprocessor().preprocess(
+            text="我现在单身。",
+            timestamp=timestamp,
+            turn_id="turn_sensitive",
+        )
+        payload = {
+            "candidate_memories": [
+                {
+                    "layer": "semantic_fact",
+                    "key": "relationship_status",
+                    "value": "single",
+                    "normalized_value": "",
+                    "confidence": 0.86,
+                    "authority": "assistant_inferred",
+                    "sensitivity": "personal",
+                    "evidence": "我现在单身",
+                    "validity": {"valid_to": "2026-06-01T09:00:00+08:00"},
+                }
+            ]
+        }
+
+        records = LLMMemoryProposalExtractor().parse_response_payload(
+            payload,
+            turn=turn,
+            user_id="user-1",
+        )
+
+        self.assertEqual(records[0].sensitivity, Sensitivity.SENSITIVE)
+        self.assertEqual(records[0].normalized_value, "single")
+        self.assertEqual(records[0].valid_to, datetime(2026, 6, 1, 9, 0, tzinfo=self.tz))
+
+    def test_llm_proposal_extractor_returns_no_candidates_for_forget_command(self) -> None:
+        turn = TurnPreprocessor().preprocess(
+            text="不要记，我现在单身。",
+            timestamp=datetime(2026, 5, 1, 9, 0, tzinfo=self.tz),
+            turn_id="turn_private",
+        )
+        payload = {
+            "candidate_memories": [
+                {
+                    "layer": "semantic_fact",
+                    "key": "relationship_status",
+                    "value": "single",
+                    "confidence": 0.9,
+                    "authority": "user_explicit",
+                    "sensitivity": "sensitive",
+                    "evidence": "我现在单身",
+                }
+            ]
+        }
+
+        records = LLMMemoryProposalExtractor().parse_response_payload(
+            payload,
+            turn=turn,
+            user_id="user-1",
+        )
+
+        self.assertEqual(records, [])
 
     def test_career_event_skill_detects_and_updates_interview_event(self) -> None:
         timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
@@ -1349,6 +1448,95 @@ class MemoryApiTest(unittest.TestCase):
 
         self.assertIn("candidate", item)
         self.assertIn("before_after_diff", item)
+
+    def test_v2_ingest_accepts_llm_payload_extractor(self) -> None:
+        session_id = f"phase2-llm-{uuid4().hex}"
+        response = self.client.post(
+            "/v2/users/test-user/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "回答直接一点。",
+                "options": {
+                    "extractor": "llm_payload",
+                    "return_candidates": True,
+                    "llm_payload": {
+                        "candidate_memories": [
+                            {
+                                "layer": "preference",
+                                "key": "communication_style",
+                                "value": "direct",
+                                "confidence": 0.9,
+                                "authority": "user_explicit",
+                                "sensitivity": "personal",
+                                "evidence": "回答直接一点",
+                            }
+                        ]
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["candidate_memories"][0]["metadata"]["extractor_version"], "llm-proposal-v0")
+        self.assertEqual(payload["operations"][0]["operation"], "create")
+        self.assertTrue(payload["persisted_records"])
+
+    def test_v2_ingest_invalid_llm_payload_returns_422(self) -> None:
+        response = self.client.post(
+            "/v2/users/test-user/turns/ingest",
+            json={
+                "session_id": f"phase2-llm-invalid-{uuid4().hex}",
+                "role": "user",
+                "text": "回答直接一点。",
+                "options": {
+                    "extractor": "llm_payload",
+                    "llm_payload": {"candidate_memories": [{"key": "communication_style"}]},
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("candidate missing required fields", response.json()["detail"])
+
+    def test_v2_ingest_llm_sensitive_candidate_enters_review_queue(self) -> None:
+        user_id = f"llm-review-user-{uuid4().hex}"
+        session_id = f"llm-review-session-{uuid4().hex}"
+        response = self.client.post(
+            f"/v2/users/{user_id}/turns/ingest",
+            json={
+                "session_id": session_id,
+                "role": "user",
+                "text": "我现在单身。",
+                "options": {
+                    "extractor": "llm_payload",
+                    "return_candidates": True,
+                    "llm_payload": {
+                        "candidate_memories": [
+                            {
+                                "layer": "semantic_fact",
+                                "key": "relationship_status",
+                                "value": "single",
+                                "confidence": 0.86,
+                                "authority": "assistant_inferred",
+                                "sensitivity": "personal",
+                                "evidence": "我现在单身",
+                            }
+                        ]
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["candidate_memories"][0]["sensitivity"], "sensitive")
+        self.assertEqual(payload["operations"][0]["operation"], "ask_user_confirmation")
+
+        queue = self.client.get(f"/v2/users/{user_id}/memory/review-queue")
+        self.assertEqual(queue.status_code, 200)
+        self.assertTrue(queue.json()["review_items"])
 
     def test_v2_ingest_honors_do_not_remember_command(self) -> None:
         ingest = self.client.post(
