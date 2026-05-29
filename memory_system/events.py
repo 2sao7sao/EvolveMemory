@@ -298,12 +298,209 @@ class LifeEventSkill:
         return ["progress", "blocker", "resolution"]
 
 
+class ProjectEventSkill:
+    name = "project_event_skill"
+    event_types = [
+        "project.planning",
+        "project.blocked",
+        "project.review",
+        "project.launch",
+        "project.completed",
+    ]
+    QUERY_CUES = ("项目", "需求", "PR", "review", "上线", "发布", "架构", "实现")
+    BLOCKER_TERMS = ("卡住", "阻塞", "blocker", "没思路", "风险")
+    RESOLVED_TERMS = ("上线了", "发布了", "合并了", "完成了", "done")
+
+    def detect(self, candidates: list[MemoryRecord]) -> list[EventMemoryState]:
+        events: list[EventMemoryState] = []
+        for candidate in candidates:
+            if candidate.layer != MemoryLayer.EPISODIC_EVENT:
+                continue
+            event_type = self._event_type(candidate)
+            if event_type is None:
+                continue
+            events.append(
+                EventMemoryState(
+                    memory_id=candidate.id,
+                    event_type=event_type,
+                    status="open",
+                    stage=self._initial_stage(event_type),
+                    expected_next_signals=self._signals_for_type(event_type),
+                    related_state_keys=["work_status", "current_bandwidth"],
+                    followup_policy=FollowupPolicy(
+                        cue_intents=["project", "code_review", "architecture", "launch"],
+                        cooldown_days=5,
+                        max_followups_per_event=3,
+                    ),
+                    updated_at=candidate.observed_at,
+                )
+            )
+        return events
+
+    def update_state(self, event: EventMemoryState, new_evidence: MemoryRecord) -> EventMemoryState:
+        evidence = f"{new_evidence.value} {new_evidence.metadata.get('evidence', '')}"
+        updated = event.model_copy(deep=True)
+        updated.updated_at = new_evidence.observed_at
+        if any(term in evidence for term in self.RESOLVED_TERMS):
+            updated.status = "resolved"
+            updated.stage = "completed"
+            updated.resolution_summary = str(new_evidence.value)
+            return updated
+        if any(term in evidence for term in self.BLOCKER_TERMS):
+            updated.status = "blocked"
+            updated.stage = "blocked"
+            if str(new_evidence.value) not in updated.blockers:
+                updated.blockers.append(str(new_evidence.value))
+            return updated
+        updated.status = "progressing"
+        if "review" in evidence or "评审" in evidence:
+            updated.stage = "review"
+        elif "上线" in evidence or "发布" in evidence:
+            updated.stage = "launch"
+        return updated
+
+    def expected_next_signals(self, event: EventMemoryState) -> list[str]:
+        if event.status == "blocked":
+            return ["blocker", "owner", "next unblock action"]
+        if event.stage == "review":
+            return ["review feedback", "approval", "remaining changes"]
+        if event.stage == "launch":
+            return ["launch result", "rollback risk", "follow-up tasks"]
+        return event.expected_next_signals
+
+    def should_follow_up(self, event: EventMemoryState, query: str, now: datetime) -> bool:
+        policy = event.followup_policy
+        if not policy.enabled or policy.user_rejected_followup:
+            return False
+        if event.status not in {"open", "progressing", "blocked"}:
+            return False
+        if policy.followup_count >= policy.max_followups_per_event:
+            return False
+        if not any(cue in query for cue in self.QUERY_CUES):
+            return False
+        if policy.last_followed_up_at is None:
+            return True
+        return (now - policy.last_followed_up_at).days >= policy.cooldown_days
+
+    def convert_to_residue(self, event: EventMemoryState) -> list[MemoryRecord]:
+        return []
+
+    def _event_type(self, candidate: MemoryRecord) -> str | None:
+        text = f"{candidate.value} {candidate.metadata.get('evidence', '')}"
+        if any(term in text for term in ("review", "评审", "PR")):
+            return "project.review"
+        if any(term in text for term in ("上线", "发布", "launch")):
+            return "project.launch"
+        if any(term in text for term in self.BLOCKER_TERMS):
+            return "project.blocked"
+        if candidate.key in {"project_event", "life_event"} and any(term in text for term in ("项目", "需求", "spec", "架构")):
+            return "project.planning"
+        return None
+
+    def _initial_stage(self, event_type: str) -> str:
+        return event_type.split(".")[-1]
+
+    def _signals_for_type(self, event_type: str) -> list[str]:
+        if event_type == "project.blocked":
+            return ["blocker", "owner", "next unblock action"]
+        if event_type == "project.review":
+            return ["review feedback", "approval", "remaining changes"]
+        if event_type == "project.launch":
+            return ["launch date", "risk", "rollback plan"]
+        return ["scope", "owner", "deadline", "next milestone"]
+
+
+class RelationshipEventSkill:
+    name = "relationship_event_skill"
+    event_types = ["relationship.transition", "relationship.conflict", "relationship.repair"]
+    QUERY_CUES = ("关系", "伴侣", "分手", "复合", "沟通", "感情")
+    BLOCKER_TERMS = ("吵架", "冲突", "冷战", "不知道怎么说")
+    RESOLVED_TERMS = ("和好了", "谈开了", "结束了", "稳定了")
+
+    def detect(self, candidates: list[MemoryRecord]) -> list[EventMemoryState]:
+        events: list[EventMemoryState] = []
+        for candidate in candidates:
+            if candidate.layer != MemoryLayer.EPISODIC_EVENT:
+                continue
+            event_type = self._event_type(candidate)
+            if event_type is None:
+                continue
+            events.append(
+                EventMemoryState(
+                    memory_id=candidate.id,
+                    event_type=event_type,
+                    status="open",
+                    stage="adjusting",
+                    expected_next_signals=["emotional state", "support need", "boundary or decision"],
+                    related_state_keys=["relationship_status", "current_emotional_state"],
+                    followup_policy=FollowupPolicy(
+                        cue_intents=["relationship", "emotional_support"],
+                        cooldown_days=21,
+                        max_followups_per_event=1,
+                    ),
+                    updated_at=candidate.observed_at,
+                )
+            )
+        return events
+
+    def update_state(self, event: EventMemoryState, new_evidence: MemoryRecord) -> EventMemoryState:
+        evidence = f"{new_evidence.value} {new_evidence.metadata.get('evidence', '')}"
+        updated = event.model_copy(deep=True)
+        updated.updated_at = new_evidence.observed_at
+        if any(term in evidence for term in self.RESOLVED_TERMS):
+            updated.status = "resolved"
+            updated.stage = "resolved"
+            updated.resolution_summary = str(new_evidence.value)
+        elif any(term in evidence for term in self.BLOCKER_TERMS):
+            updated.status = "blocked"
+            updated.stage = "conflict"
+            if str(new_evidence.value) not in updated.blockers:
+                updated.blockers.append(str(new_evidence.value))
+        else:
+            updated.status = "progressing"
+        return updated
+
+    def expected_next_signals(self, event: EventMemoryState) -> list[str]:
+        if event.status == "blocked":
+            return ["support need", "boundary", "next conversation"]
+        return event.expected_next_signals
+
+    def should_follow_up(self, event: EventMemoryState, query: str, now: datetime) -> bool:
+        policy = event.followup_policy
+        if not policy.enabled or policy.user_rejected_followup:
+            return False
+        if event.status not in {"open", "progressing", "blocked"}:
+            return False
+        if policy.followup_count >= policy.max_followups_per_event:
+            return False
+        if not any(cue in query for cue in self.QUERY_CUES):
+            return False
+        if policy.last_followed_up_at is None:
+            return True
+        return (now - policy.last_followed_up_at).days >= policy.cooldown_days
+
+    def convert_to_residue(self, event: EventMemoryState) -> list[MemoryRecord]:
+        return []
+
+    def _event_type(self, candidate: MemoryRecord) -> str | None:
+        text = f"{candidate.value} {candidate.metadata.get('evidence', '')}"
+        if candidate.key == "life_event" and candidate.value == "breakup":
+            return "relationship.transition"
+        if any(term in text for term in self.BLOCKER_TERMS):
+            return "relationship.conflict"
+        if any(term in text for term in ("关系", "伴侣", "感情", "分手")):
+            return "relationship.transition"
+        return None
+
+
 class EventSkillRegistry:
     def __init__(self, skills: list[EventSkill] | None = None) -> None:
         self.skills = skills or [
             CareerEventSkill(),
             LearningEventSkill(),
             LifeEventSkill(),
+            ProjectEventSkill(),
+            RelationshipEventSkill(),
         ]
 
     def detect(self, candidates: list[MemoryRecord]) -> list[EventMemoryState]:

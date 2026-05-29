@@ -32,12 +32,14 @@ from memory_system import (
     MemoryUseGate,
     MemoryWriteEvaluator,
     NormalizedSQLiteMemoryRepository,
+    ProjectEventSkill,
     ProfileAccumulator,
     ProfileEvidenceExtractor,
     ProfileInferencer,
     PromptContextBuilder,
     QueryIntentClassifier,
     QueryMemoryRetriever,
+    RelationshipEventSkill,
     ResponsePolicyEngine,
     RetrievalPlanner,
     RuleMemoryProposalExtractor,
@@ -769,6 +771,149 @@ class MemorySystemTest(unittest.TestCase):
         hypotheses = ProfileAccumulator().accumulate(evidence)
 
         self.assertFalse([item for item in hypotheses if item.dimension == "detail_tolerance"])
+
+    def test_richer_profile_evidence_drives_response_policy(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        records = []
+        for index, text in enumerate(["给我清单。", "用清单列步骤。"], start=1):
+            turn = TurnPreprocessor().preprocess(
+                text=text,
+                timestamp=timestamp,
+                turn_id=f"plan_{index}",
+            )
+            records.extend(RuleMemoryProposalExtractor().propose(turn, user_id="user-1"))
+
+        evidence = ProfileEvidenceExtractor().extract(records)
+        hypotheses = ProfileAccumulator().accumulate(evidence)
+        profile = hypotheses[0].to_record(
+            user_id="user-1",
+            session_id=None,
+            observed_at=timestamp,
+        )
+        policy = ResponsePolicyEngine().build_from_memories([
+            MemoryItem(
+                memory_type=MemoryType.PROFILE,
+                key=profile.key,
+                value=profile.value,
+                confidence=profile.confidence,
+                source="profile",
+                evidence=profile.metadata["rationale"],
+                valid_from=timestamp,
+            )
+        ])
+
+        self.assertEqual(hypotheses[0].dimension, "planning_orientation")
+        self.assertIn("repeated", hypotheses[0].rationale)
+        self.assertEqual(policy.structure, "checklist")
+
+    def test_response_policy_consumes_new_profile_dimensions_with_precedence(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        memories = [
+            MemoryItem(
+                memory_type=MemoryType.PROFILE,
+                key="learning_style",
+                value="example_first",
+                confidence=0.8,
+                source="profile",
+                evidence="repeated learning signals",
+                valid_from=timestamp,
+            ),
+            MemoryItem(
+                memory_type=MemoryType.PROFILE,
+                key="collaboration_style",
+                value="challenge",
+                confidence=0.8,
+                source="profile",
+                evidence="repeated critique requests",
+                valid_from=timestamp,
+            ),
+            MemoryItem(
+                memory_type=MemoryType.STATE,
+                key="current_bandwidth",
+                value="busy",
+                confidence=0.8,
+                source="turn",
+                evidence="很忙",
+                valid_from=timestamp,
+            ),
+            MemoryItem(
+                memory_type=MemoryType.PROFILE,
+                key="pace_preference",
+                value="slow",
+                confidence=0.8,
+                source="profile",
+                evidence="slow pace",
+                valid_from=timestamp,
+            ),
+        ]
+
+        policy = ResponsePolicyEngine().build_from_memories(memories)
+
+        self.assertEqual(policy.example_density, "high")
+        self.assertEqual(policy.challenge_level, "high")
+        self.assertEqual(policy.pace, "fast")
+
+    def test_context_compiler_keeps_new_profile_guidance_policy_only(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        memory = MemoryItem(
+            memory_type=MemoryType.PROFILE,
+            key="learning_style",
+            value="example_first",
+            confidence=0.8,
+            source="profile",
+            evidence="examples",
+            valid_from=timestamp,
+            allowed_use=["style"],
+        )
+        gate_result = MemoryUseGate().select("解释这个概念", [memory], now=timestamp)
+        context = self.prompt_builder.context_compiler.compile(
+            query="解释这个概念",
+            gate_result=gate_result,
+            response_policy=ResponsePolicyEngine().build_from_memories([memory]),
+        )
+
+        self.assertEqual(context.direct_facts, [])
+        self.assertIn("examples", " ".join(context.style_policy).lower())
+
+    def test_project_and_relationship_event_skills(self) -> None:
+        timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
+        project = MemoryRecord(
+            user_id="user-1",
+            layer=MemoryLayer.EPISODIC_EVENT,
+            key="project_event",
+            value="项目架构评审卡住了",
+            confidence=0.86,
+            valid_from=timestamp,
+            observed_at=timestamp,
+            metadata={"evidence": "项目架构评审卡住了"},
+        )
+        relationship = MemoryRecord(
+            user_id="user-1",
+            layer=MemoryLayer.EPISODIC_EVENT,
+            key="life_event",
+            value="breakup",
+            confidence=0.86,
+            valid_from=timestamp,
+            observed_at=timestamp,
+            metadata={"evidence": "分手了"},
+        )
+
+        project_event = ProjectEventSkill().detect([project])[0]
+        relationship_event = RelationshipEventSkill().detect([relationship])[0]
+
+        self.assertEqual(project_event.event_type, "project.review")
+        self.assertEqual(relationship_event.event_type, "relationship.transition")
+        self.assertEqual(relationship_event.followup_policy.cooldown_days, 21)
+        self.assertEqual(relationship_event.followup_policy.max_followups_per_event, 1)
+
+    def test_retrieval_planner_includes_mental_model_layers_for_project_and_learning(self) -> None:
+        project_plan = RetrievalPlanner().plan("这个项目架构怎么实现？", max_prompt_memories=8)
+        learning_plan = RetrievalPlanner().plan("用例子解释这个概念", max_prompt_memories=8)
+
+        self.assertEqual(project_plan.intent.name, "project_work")
+        self.assertIn(MemoryLayer.EPISODIC_EVENT, project_plan.include_layers)
+        self.assertIn(MemoryLayer.INFERRED_PROFILE, learning_plan.include_layers)
+        self.assertIn(MemoryLayer.PROCEDURAL_MEMORY, learning_plan.include_layers)
 
     def test_hybrid_memory_scorer_scores_keyword_embedding_and_layer_prior(self) -> None:
         timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)

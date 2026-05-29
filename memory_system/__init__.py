@@ -9,7 +9,14 @@ from .engine import (
     ResponsePolicyEngine,
 )
 from .context import CompiledMemoryContext, ContextCompiler
-from .events import CareerEventSkill, EventSkillRegistry, LearningEventSkill, LifeEventSkill
+from .events import (
+    CareerEventSkill,
+    EventSkillRegistry,
+    LearningEventSkill,
+    LifeEventSkill,
+    ProjectEventSkill,
+    RelationshipEventSkill,
+)
 from .extraction import (
     LLMMemoryProposalExtractor,
     LLMProposalSchemaValidator,
@@ -129,11 +136,13 @@ __all__ = [
     "ProfileEvidenceExtractor",
     "ProfileHypothesis",
     "PreprocessedTurn",
+    "ProjectEventSkill",
     "PromptContextBuilder",
     "PromptVisibility",
     "QueryMemoryRetriever",
     "QueryIntent",
     "QueryIntentClassifier",
+    "RelationshipEventSkill",
     "RetrievalPlan",
     "RetrievalPlanner",
     "ResponsePolicy",

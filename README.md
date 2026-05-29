@@ -12,7 +12,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.11%2B-2563eb" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/tests-54%20passed-1b6f8f" alt="54 tests passed">
+  <img src="https://img.shields.io/badge/tests-59%20passed-1b6f8f" alt="59 tests passed">
   <img src="https://img.shields.io/badge/gate_eval-8%2F8-167b63" alt="Gate eval 8/8">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
 </p>
@@ -154,6 +154,18 @@ context = runtime.prompt_context("帮我 review 这段代码。", now)
 print(context["assembled_prompt"])
 ```
 
+## Phase 2 Upgrade Highlights
+
+This release deepens EvolveMemory from a governed memory store into a richer mental-model runtime:
+
+| Upgrade | What changed |
+| --- | --- |
+| Evidence-accumulated mental models | Profiles now cover planning orientation, learning style, cognitive load, collaboration style, uncertainty tolerance, and risk posture. |
+| Procedural collaboration memory | Explicit instructions such as checklist planning, example-first explanations, coaching style, and candid critique become policy-safe guidance. |
+| Expanded response policy compiler | Memory can now shape reasoning depth, example density, initiative, challenge level, personalization strength, and follow-up budget. |
+| Broader event state machines | Project and relationship event skills join career, learning, and life events with stricter privacy-aware follow-up rules. |
+| Quality evals | New deterministic eval suites cover profile evidence, response policy, event skills, and prompt-context safety. |
+
 ## API Shape
 
 | Endpoint | Purpose |
@@ -169,16 +181,45 @@ print(context["assembled_prompt"])
 ## Architecture
 
 ```mermaid
-flowchart TD
-  A["Dialogue turn"] --> B["Proposal extraction"]
-  B --> C["Write governance"]
-  C --> D["Normalized storage"]
-  D --> E["Retrieval planner"]
-  E --> F["Memory-use gate"]
-  F --> G["Response policy"]
-  G --> H["Safe prompt context"]
-  D --> I["Correction / delete / forget-all"]
-  I --> J["Audit export"]
+flowchart LR
+  subgraph Observe["Observe and propose"]
+    A["User turn"] --> B["Turn preprocessor"]
+    B --> C["Rule / LLM proposal boundary"]
+    C --> D["Schema validation and normalization"]
+  end
+
+  subgraph Govern["Write governance"]
+    D --> E["Sensitivity and contradiction checks"]
+    E --> F["Weighted write evaluator"]
+    F --> G{"Create, merge, review, reject?"}
+  end
+
+  subgraph Store["Normalized memory runtime"]
+    G --> H["Memory records"]
+    G --> I["Review queue"]
+    H --> J["Profile evidence ledger"]
+    H --> K["Event state store"]
+    H --> L["Audit log"]
+  end
+
+  subgraph Use["Use safely"]
+    M["Current query"] --> N["Intent-aware retrieval planner"]
+    H --> O["Hybrid scorer"]
+    J --> P["Mental-model compiler"]
+    K --> Q["Event follow-up policy"]
+    N --> O
+    O --> R["Memory-use gate"]
+    P --> R
+    Q --> R
+    R --> S["Response policy"]
+    S --> T["Safe prompt context"]
+  end
+
+  subgraph Improve["Govern and improve"]
+    U["Correct / delete / forget-all"] --> H
+    L --> V["Audit export"]
+    T --> W["Profile / policy / event / safety evals"]
+  end
 ```
 
 ## Stable vs Prototype

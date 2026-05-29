@@ -12,7 +12,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.11%2B-2563eb" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/tests-54%20passed-1b6f8f" alt="54 tests passed">
+  <img src="https://img.shields.io/badge/tests-59%20passed-1b6f8f" alt="59 tests passed">
   <img src="https://img.shields.io/badge/gate_eval-8%2F8-167b63" alt="Gate eval 8/8">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
 </p>
@@ -152,6 +152,18 @@ context = runtime.prompt_context("帮我 review 这段代码。", now)
 print(context["assembled_prompt"])
 ```
 
+## Phase 2 升级亮点
+
+这次升级把 EvolveMemory 从可治理 memory store 进一步推进为更完整的心智模型 runtime：
+
+| 升级点 | 变化 |
+| --- | --- |
+| Evidence-accumulated 心智模型 | Profile 扩展到 planning orientation、learning style、cognitive load、collaboration style、uncertainty tolerance、risk posture。 |
+| Procedural collaboration memory | 清单式规划、先举例、教练式追问、直接挑刺等显式协作指令会转成安全 policy guidance。 |
+| Response policy compiler 扩展 | Memory 现在可以影响 reasoning depth、example density、initiative、challenge level、personalization strength、follow-up budget。 |
+| 更多事件状态机 | Project 和 relationship event skills 加入 career、learning、life 事件，并带更严格的隐私 follow-up 规则。 |
+| 质量 eval | 新增 profile evidence、response policy、event skill、prompt-context safety 的确定性 eval。 |
+
 ## API 形态
 
 | Endpoint | 作用 |
@@ -167,16 +179,45 @@ print(context["assembled_prompt"])
 ## 架构
 
 ```mermaid
-flowchart TD
-  A["Dialogue turn"] --> B["Proposal extraction"]
-  B --> C["Write governance"]
-  C --> D["Normalized storage"]
-  D --> E["Retrieval planner"]
-  E --> F["Memory-use gate"]
-  F --> G["Response policy"]
-  G --> H["Safe prompt context"]
-  D --> I["Correction / delete / forget-all"]
-  I --> J["Audit export"]
+flowchart LR
+  subgraph Observe["Observe and propose"]
+    A["User turn"] --> B["Turn preprocessor"]
+    B --> C["Rule / LLM proposal boundary"]
+    C --> D["Schema validation and normalization"]
+  end
+
+  subgraph Govern["Write governance"]
+    D --> E["Sensitivity and contradiction checks"]
+    E --> F["Weighted write evaluator"]
+    F --> G{"Create, merge, review, reject?"}
+  end
+
+  subgraph Store["Normalized memory runtime"]
+    G --> H["Memory records"]
+    G --> I["Review queue"]
+    H --> J["Profile evidence ledger"]
+    H --> K["Event state store"]
+    H --> L["Audit log"]
+  end
+
+  subgraph Use["Use safely"]
+    M["Current query"] --> N["Intent-aware retrieval planner"]
+    H --> O["Hybrid scorer"]
+    J --> P["Mental-model compiler"]
+    K --> Q["Event follow-up policy"]
+    N --> O
+    O --> R["Memory-use gate"]
+    P --> R
+    Q --> R
+    R --> S["Response policy"]
+    S --> T["Safe prompt context"]
+  end
+
+  subgraph Improve["Govern and improve"]
+    U["Correct / delete / forget-all"] --> H
+    L --> V["Audit export"]
+    T --> W["Profile / policy / event / safety evals"]
+  end
 ```
 
 ## 稳定能力与原型边界
