@@ -39,8 +39,10 @@
   <rect x="680" y="340" width="150" height="72" rx="12" class="card strong"/>
   <text x="700" y="366" class="eyebrow">PERMIT</text><text x="700" y="392" class="h">Use gate</text>
   <line x1="830" y1="376" x2="872" y2="376" class="line"/>
-  <rect x="872" y="340" width="150" height="72" rx="12" class="card"/>
-  <text x="892" y="366" class="eyebrow">ACTIONS</text><text x="892" y="392" class="mono">direct / style / suppress</text>
+  <rect x="872" y="340" width="190" height="72" rx="12" class="card"/>
+  <text x="892" y="366" class="eyebrow">ACTIONS</text>
+  <text x="892" y="390" class="mono">direct / style</text>
+  <text x="892" y="408" class="mono">suppress</text>
 
   <rect x="72" y="474" width="1056" height="124" rx="18" class="lane3"/>
   <text x="96" y="510" class="h">03 Prompt path</text>

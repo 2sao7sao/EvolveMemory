@@ -24,7 +24,10 @@
   <text x="442" y="230" class="mono">G_social = base</text>
   <text x="442" y="260" class="mono">         * cultural_context</text>
   <text x="442" y="290" class="mono">         * life_stage</text>
-  <text x="442" y="330" class="body">Context resolution adds rationale, not raw private text.</text>
+  <text x="442" y="326" class="body">
+    <tspan x="442" dy="0">Context resolution adds rationale,</tspan>
+    <tspan x="442" dy="20">not raw private text.</tspan>
+  </text>
 
   <line x1="740" y1="265" x2="802" y2="265" class="line"/>
   <rect x="802" y="150" width="342" height="230" rx="18" class="gold"/>
@@ -32,7 +35,10 @@
   <text x="834" y="230" class="mono">G = G_social</text>
   <text x="834" y="260" class="mono">  * (1 + personal_importance)</text>
   <text x="834" y="290" class="mono">  / (1 + fatigue)</text>
-  <text x="834" y="330" class="body">Still only a retrieval factor. The gate controls visibility.</text>
+  <text x="834" y="326" class="body">
+    <tspan x="834" dy="0">Still only a retrieval factor.</tspan>
+    <tspan x="834" dy="20">The gate controls visibility.</tspan>
+  </text>
 
   <rect x="56" y="422" width="1088" height="76" rx="16" class="panel"/>
   <text x="88" y="454" class="h">Design intent</text>

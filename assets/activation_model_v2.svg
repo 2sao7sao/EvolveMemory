@@ -23,7 +23,10 @@
   <text x="756" y="216" class="mono">z = 0.50 * duration_ratio</text>
   <text x="756" y="246" class="mono">  + 0.30 * recurrence</text>
   <text x="756" y="276" class="mono">  + 0.20 * severity</text>
-  <text x="756" y="320" class="body">Persistent volatile states stay visible for review or careful follow-up.</text>
+  <text x="756" y="314" class="body">
+    <tspan x="756" dy="0">Persistent volatile states stay visible</tspan>
+    <tspan x="756" dy="20">for review or careful follow-up.</tspan>
+  </text>
 
   <rect x="56" y="396" width="1088" height="110" rx="18" class="state"/>
   <text x="88" y="434" class="h">Output phases</text>
