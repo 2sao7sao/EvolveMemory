@@ -13,6 +13,7 @@ from memory_system import (
     ContextCompiler,
     DialogueMemoryExtractor,
     EventSkillRegistry,
+    HybridMemoryScorer,
     LLMMemoryProposalExtractor,
     LLMProposalValidationError,
     MemoryItem,
@@ -26,6 +27,7 @@ from memory_system import (
     ProfileEvidenceExtractor,
     ProfileInferencer,
     ResponsePolicyEngine,
+    RetrievalPlanner,
     RuleMemoryProposalExtractor,
     Sensitivity,
     TurnPreprocessor,
@@ -299,6 +301,47 @@ def run_retrieval_privacy_eval(cases_dir: Path = DEFAULT_CASES_DIR) -> dict[str,
     return {"suite": "retrieval_privacy_eval", "metrics": {"privacy_actions": metric.to_dict()}, "failures": failures}
 
 
+def run_retrieval_math_eval(cases_dir: Path = DEFAULT_CASES_DIR) -> dict[str, object]:
+    metric = RateMetric()
+    failures: list[dict[str, object]] = []
+    timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    for case in _read_jsonl(cases_dir / "retrieval_math_eval.jsonl"):
+        memories = [
+            MemoryItem(
+                memory_type=MemoryType(item["type"]),
+                key=item["key"],
+                value=item["value"],
+                confidence=item.get("confidence", 0.86),
+                source="eval",
+                evidence=item.get("evidence", item["key"]),
+                valid_from=timestamp,
+            )
+            for item in case["memories"]
+        ]
+        plan = RetrievalPlanner().plan(case["query"], max_prompt_memories=8)
+        scores = HybridMemoryScorer().score(case["query"], memories, now=timestamp, plan=plan)
+        top = scores[0] if scores else None
+        factors = top.factors if top else {}
+        passed = top is not None and top.memory.key == case["expected_top_key"]
+        for factor, minimum in case.get("expected_min_factors", {}).items():
+            passed = passed and factors.get(factor, 0.0) >= minimum
+        metric.add(passed)
+        if not passed:
+            failures.append(
+                {
+                    "case_id": case["id"],
+                    "expected_top_key": case["expected_top_key"],
+                    "actual_top_key": top.memory.key if top else None,
+                    "factors": factors,
+                }
+            )
+    return {
+        "suite": "retrieval_math_eval",
+        "metrics": {"retrieval_math": metric.to_dict("pass_rate")},
+        "failures": failures,
+    }
+
+
 def run_v2_ingest_eval(cases_dir: Path = DEFAULT_CASES_DIR) -> dict[str, object]:
     metric = RateMetric()
     failures: list[dict[str, object]] = []
@@ -371,6 +414,7 @@ SUITES = {
     "extraction_eval": run_extraction_eval,
     "write_decision_eval": run_write_decision_eval,
     "retrieval_privacy_eval": run_retrieval_privacy_eval,
+    "retrieval_math_eval": run_retrieval_math_eval,
     "v2_ingest_eval": run_v2_ingest_eval,
 }
 

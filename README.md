@@ -1,4 +1,4 @@
-<img src="assets/adaptive-memory-engine-hero.png" alt="EvolveMemory banner" width="100%" />
+<img src="assets/evolvememory-math-runtime-hero.png" alt="EvolveMemory mathematical memory runtime hero" width="100%" />
 
 <p align="center">
   <a href="./README.zh-CN.md">简体中文</a>
@@ -19,42 +19,44 @@
 
 # EvolveMemory
 
-**Adaptive memory runtime: decide what to remember, what to use, what to hide, and what to forget.**
+**A governed adaptive memory runtime for AI personalization.**
 
-Memory should make an AI feel more useful and natural. It should not make the
-assistant sound like it is dragging old private details into every answer.
+EvolveMemory is not a transcript store and not a vector database wrapper. It is
+a runtime for deciding what should be remembered, what is only a candidate,
+what may influence an answer, what must stay hidden, and what should be
+corrected or forgotten.
 
-EvolveMemory treats memory as a product control layer:
+> Retrieval is not permission. A retrieved memory is only a candidate until the
+> memory-use gate decides whether it can be used directly, converted into style
+> policy, used as a follow-up cue, kept as a hidden constraint, summarized, or
+> suppressed.
 
-> Remember selectively. Retrieve candidates. Gate permission. Compile safe prompt context. Correct or forget on demand.
-
-## Core Thesis
-
-Retrieval is not permission. A retrieved memory is only a candidate signal until the memory-use gate decides whether it may shape direct facts, style, follow-up, hidden constraints, clarification, summarize-only context, or suppression. LLM extraction follows the same rule: model output can propose candidates, but deterministic validation and write governance remain the writer of record.
-
-![EvolveMemory adaptive replay](docs/assets/evolvememory-gate-replay.svg)
-
-## 30-Second Product Path
+## Runtime Contract
 
 ```text
-User turn
-  -> memory proposal
+user turn
+  -> proposal extraction
   -> write governance
   -> normalized store
-  -> retrieval planning
+  -> retrieval plan
+  -> hybrid math score
   -> memory-use gate
   -> response policy
-  -> safe prompt context
-  -> correction / audit
+  -> prompt-safe context
+  -> correction / audit / evals
 ```
 
-| Common memory system | EvolveMemory |
+<img src="assets/mode_matrix.svg" alt="EvolveMemory runtime modes: observe, write, retrieve, adapt, correct, audit" width="100%" />
+
+| Runtime boundary | Contract |
 | --- | --- |
-| Saves every extracted fact | Scores whether a candidate should be written |
-| Retrieves and injects memories | Separates retrieval from permission |
-| Mentions personal details too eagerly | Uses direct, style-only, follow-up, summarize-only, hidden, clarify, or suppress actions |
-| Makes prompts longer | Compiles only prompt-safe context |
-| Forgets poorly | Supports correction, retirement, forget-all, review queue, and audit export |
+| Observe | Extract candidates from a turn or provider-free LLM payload. |
+| Govern | Validate, score, review, reject, merge, or supersede candidates. |
+| Store | Keep normalized records, evidence, event states, settings, and audit logs. |
+| Retrieve | Rank candidates by intent, relevance, lifecycle, causal impact, and semantic gravity. |
+| Gate | Decide allowed use: direct, style-only, follow-up, clarify, hidden, summary, suppress. |
+| Compile | Produce prompt-safe sections rather than raw private memory injection. |
+| Correct | Retire, delete, forget-all, or export audit evidence. |
 
 ## 5-Minute Replay
 
@@ -87,52 +89,146 @@ gate_eval: 8/8
 
 ## What The Replay Proves
 
-The replay stores two turns:
+The replay stores two user turns:
 
-| Turn | Meaning |
+| Turn | Memory meaning |
 | --- | --- |
-| `我最近准备面试，有点焦虑。` | Ongoing event + sensitive emotional state |
-| `回答直接一点，先给结论。` | Durable communication preference |
+| `我最近准备面试，有点焦虑。` | Ongoing event plus sensitive emotional state. |
+| `回答直接一点，先给结论。` | Durable communication and structure preference. |
 
 Then it asks two different queries:
 
-| Query | Correct memory behavior |
+| Query | Correct behavior |
 | --- | --- |
-| `面试怎么准备？` | Use interview event as `follow_up`; apply style preferences without exposing raw profile facts. |
+| `面试怎么准备？` | Use the interview event as `follow_up`; apply style policy without exposing raw profile facts. |
 | `今天只帮我 review Python 代码，不用提面试。` | Suppress the interview event; keep style adaptation; avoid direct visible memory injection. |
 
 Finally it simulates a correction: the user does not want anxiety remembered.
-The product path retires both the sensitive state and its derived profile signal.
+The runtime retires both the sensitive state and the derived profile signal.
 
-## Metrics That Map To Code
+<img src="docs/assets/evolvememory-gate-replay.svg" alt="Replay proof for gate, suppression, style continuity, and correction" width="100%" />
 
-| Metric | What it measures | Runtime source |
-| --- | --- | --- |
-| `gate_action_accuracy` | Expected memory-use actions across regression cases | `evals.runner.run_gate_eval` |
-| `explicit_suppression_rate` | Whether explicit "do not mention X" suppresses the matching event | `MemoryUseGate` |
-| `style_continuity_rate` | Whether style preferences remain useful across relevant and unrelated queries | `SessionMemoryRuntime.query` |
-| `prompt_safety_rate` | Whether no direct visible memory is injected for the no-mention query | `PromptContextBuilder` |
-| `correction_retirement_rate` | Whether correction retires sensitive state and derived profile memory | `SessionMemoryRuntime.retire_memory` |
-| `extraction` | Whether provider-free LLM payloads validate, normalize, or reject correctly | `LLMMemoryProposalExtractor` |
-| `write_decision` | Whether deterministic write governance creates, reviews, supersedes, or evidence-merges | `MemoryOperationPlanner` |
-| `privacy_actions` | Whether retrieval/gating suppresses sensitive or non-promptable memories | `MemoryUseGate` |
-| `v2_ingest` | Whether `/v2/users/{user_id}/turns/ingest` routes LLM payloads through governance | FastAPI v2 ingest |
+## Mathematical Runtime
 
-Run deterministic evals:
+EvolveMemory treats memory behavior as a scored, inspectable decision chain.
+Rules are deterministic today, but each important module emits factors,
+weights, formulas, rationale, and a version so it can later be calibrated or
+learned from feedback.
 
-```bash
-python -m evals.runner --suite gate_eval
-python -m evals.runner --suite product_replay_eval
-python -m evals.runner --suite profile_evidence_eval
-python -m evals.runner --suite response_policy_eval
-python -m evals.runner --suite event_skill_eval
-python -m evals.runner --suite prompt_context_safety_eval
-python -m evals.runner --suite extraction_eval
-python -m evals.runner --suite write_decision_eval
-python -m evals.runner --suite retrieval_privacy_eval
-python -m evals.runner --suite v2_ingest_eval
-python -m evals.runner --suite all
+`ScoreBreakdown` is the common explanation object:
+
+```python
+ScoreBreakdown(
+    name="retrieval",
+    score=0.81,
+    factors={"keyword": 0.5, "activation": 0.72, "semantic_gravity": 0.88},
+    weights={"keyword": 0.22, "activation": 0.14, "semantic_gravity": 0.06},
+    probability=0.81,
+    formula="S_ret-v3=...",
+    rationale=["career query depends on current work or event state"],
+    version="retrieval-v3.0",
+)
 ```
+
+### Retrieval Score
+
+Retrieval ranks candidates. It still does not grant permission.
+
+$$
+S_{ret}^{v3}
+= 0.22K + 0.22E + 0.14F + 0.14L + 0.14A + 0.08C + 0.06G
+$$
+
+| Symbol | Runtime factor | Meaning |
+| --- | --- | --- |
+| `K` | `keyword` | Lexical overlap with the current query. |
+| `E` | `embedding` | Deterministic embedding-like similarity for local tests and demos. |
+| `F` | `freshness` | Time freshness of the memory. |
+| `L` | `layer_prior` | Whether the query intent wants this memory layer. |
+| `A` | `activation` | Lifecycle-aware activation over confidence, age, recurrence, anomaly, fatigue. |
+| `C` | `causal_relevance` | Whether the memory changes the safe or useful answer. |
+| `G` | `semantic_gravity` | Human-context importance even when wording does not match. |
+
+### Activation And Temporal Anomaly
+
+Some memories can be stored but should not currently affect behavior. Activation
+models lifecycle decay, reinforcement, temporal anomaly, and fatigue.
+
+$$
+\log A_i(t)
+= \alpha_{\ell_i} + \log(c_i)
+- \lambda_{\ell_i}\Delta t
++ \rho\log(1+n_i)
++ \omega z_i^{anom}
+- \eta f_i
+$$
+
+<img src="assets/state_temporal_anomaly_model.svg" alt="State temporal anomaly model with TTL, recurrence, anomaly score, and phase transitions" width="100%" />
+
+### Semantic Gravity
+
+Semantic gravity prevents important life or safety context from being lost just
+because lexical overlap is weak. Job loss, interviews, exams, health
+constraints, relationship transitions, and persistent emotional state can
+matter more than a generic preference.
+
+$$
+G_{final}
+= G_{social}
+\times \frac{1 + \alpha I_{personal}}{1 + \beta F_{fatigue}}
+$$
+
+<img src="assets/semantic_gravity_world_knowledge.svg" alt="Semantic gravity model with context resolution, social gravity, and individual modulation" width="100%" />
+
+### Causal Relevance
+
+Causal retrieval asks: would this memory change the safe or useful answer?
+
+Example: if the user asks whether they can drink at a party, a medication or
+allergy memory should surface even when it is not the highest keyword match.
+That memory is still only a retrieved candidate; the use gate decides whether
+and how it can affect the answer.
+
+## Write Governance And Inference Validation
+
+LLM output is never the writer of record. A model can propose memories, but
+validation and deterministic write governance decide whether each candidate is
+created, rejected, reviewed, superseded, or merged as evidence.
+
+<img src="assets/inference_validation_engine.svg" alt="Inference validation engine routes inferred memory through search validation, dialog validation, or silent observation" width="100%" />
+
+Write governance uses a weighted score:
+
+$$
+S_{write}
+= 0.18C + 0.16R + 0.14P + 0.12T + 0.10A + 0.10E + 0.08N + 0.07U + 0.05V
+$$
+
+| Symbol | Factor |
+| --- | --- |
+| `C` | Candidate confidence. |
+| `R` | Future reuse value. |
+| `P` | Personalization gain. |
+| `T` | Temporal stability. |
+| `A` | User/source authority. |
+| `E` | Evidence quality. |
+| `N` | Novelty against existing memory. |
+| `U` | Actionability. |
+| `V` | Privacy adjustment. |
+
+## Memory-Use Gate And Prompt Safety
+
+The gate turns ranked candidates into allowed actions.
+
+| Gate action | Prompt channel |
+| --- | --- |
+| `use_directly` | Direct user facts, only when safe to mention. |
+| `style_only` | Style policy without exposing raw private evidence. |
+| `follow_up` | At most one short progress cue. |
+| `hidden_constraint` | Internal policy constraint, not visible to the user. |
+| `clarify` | Ask for current truth before using uncertain memory. |
+| `summarize_only` | Aggregate context only, no details. |
+| `suppress` | Audit only; not used in the prompt. |
 
 ## Developer Surface
 
@@ -166,115 +262,57 @@ context = runtime.prompt_context("帮我 review 这段代码。", now)
 print(context["assembled_prompt"])
 ```
 
-## Phase 2 Upgrade Highlights
-
-This release deepens EvolveMemory from a governed memory store into a richer mental-model runtime:
-
-| Upgrade | What changed | Runtime / eval |
-| --- | --- | --- |
-| Provider-free LLM proposal ingest | `/v2/users/{user_id}/turns/ingest` accepts `extractor="llm_payload"`; payloads become candidates only. | `app.py`, `LLMMemoryProposalExtractor`, `v2_ingest_eval` |
-| Semantic proposal validation | LLM payloads normalize blank values, upgrade sensitive keys, reject third-party confusion, validate tags, and preserve `valid_to`. | `LLMProposalSchemaValidator`, `extraction_eval` |
-| Evidence-accumulated mental models | Profiles now cover planning orientation, learning style, cognitive load, collaboration style, uncertainty tolerance, and risk posture. | `ProfileEvidenceExtractor`, `profile_evidence_eval` |
-| Procedural collaboration memory | Explicit instructions such as checklist planning, example-first explanations, coaching style, and candid critique become policy-safe guidance. | `ResponsePolicyEngine`, `response_policy_eval` |
-| Expanded response policy compiler | Memory can now shape reasoning depth, example density, initiative, challenge level, personalization strength, and follow-up budget. | `PromptContextBuilder`, `prompt_context_safety_eval` |
-| Broader event state machines | Project and relationship event skills join career, learning, and life events with stricter privacy-aware follow-up rules. | `EventSkillRegistry`, `event_skill_eval` |
-| Privacy and write evals | Deterministic suites cover extraction, write decisions, retrieval privacy, and v2 ingest. | `write_decision_eval`, `retrieval_privacy_eval` |
-
-## Provider-Free LLM Proposal Ingest
-
-The runtime can now accept model-produced proposal payloads without requiring a provider or network call. The LLM boundary is deliberately not a writer: the payload is parsed into candidate `MemoryRecord`s, then deterministic write governance decides create, merge, review, reject, or evidence-only update.
-
-```json
-{
-  "session_id": "demo-session",
-  "role": "user",
-  "text": "回答直接一点。",
-  "options": {
-    "extractor": "llm_payload",
-    "llm_payload": {
-      "candidate_memories": [
-        {
-          "layer": "preference",
-          "key": "communication_style",
-          "value": "direct",
-          "confidence": 0.9,
-          "authority": "user_explicit",
-          "sensitivity": "personal",
-          "evidence": "回答直接一点"
-        }
-      ]
-    }
-  }
-}
-```
-
-Invalid payloads return HTTP 422, and sensitive or restricted candidates still enter the review queue when policy requires confirmation.
-
-## API Shape
+## API Surface
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /v2/users/{user_id}/turns/ingest` | Ingest a user turn into the normalized runtime. |
-| `POST /v2/users/{user_id}/memory/query` | Retrieve and gate memories for the current query. |
+| `POST /v2/users/{user_id}/turns/ingest` | Ingest a user turn or provider-free LLM proposal payload. |
+| `POST /v2/users/{user_id}/memory/query` | Retrieve, score, and gate memories for the current query. |
 | `POST /v2/users/{user_id}/prompt-context` | Compile model-ready memory context. |
 | `GET /v2/users/{user_id}/memory/review-queue` | Inspect memories requiring confirmation. |
 | `POST /v2/users/{user_id}/memory/{memory_id}/correct` | Correct and retire conflicting records. |
 | `POST /v2/users/{user_id}/memory/forget-all` | Clear memory with audit trail. |
 | `GET /v2/users/{user_id}/memory/audit/export` | Export records, settings, events, and audit data. |
 
-## Architecture
+## Evaluation
 
-```mermaid
-flowchart LR
-  subgraph Observe["Observe and propose"]
-    A["User turn"] --> B["Turn preprocessor"]
-    B --> C["Rule / LLM proposal boundary"]
-    C --> D["Schema validation and normalization"]
-  end
+Run deterministic evals:
 
-  subgraph Govern["Write governance"]
-    D --> E["Sensitivity and contradiction checks"]
-    E --> F["Weighted write evaluator"]
-    F --> G{"Create, merge, review, reject?"}
-  end
-
-  subgraph Store["Normalized memory runtime"]
-    G --> H["Memory records"]
-    G --> I["Review queue"]
-    H --> J["Profile evidence ledger"]
-    H --> K["Event state store"]
-    H --> L["Audit log"]
-  end
-
-  subgraph Use["Use safely"]
-    M["Current query"] --> N["Intent-aware retrieval planner"]
-    H --> O["Hybrid scorer"]
-    J --> P["Mental-model compiler"]
-    K --> Q["Event follow-up policy"]
-    N --> O
-    O --> R["Memory-use gate"]
-    P --> R
-    Q --> R
-    R --> S["Response policy"]
-    S --> T["Safe prompt context"]
-  end
-
-  subgraph Improve["Govern and improve"]
-    U["Correct / delete / forget-all"] --> H
-    L --> V["Audit export"]
-    T --> W["Profile / policy / event / safety evals"]
-  end
+```bash
+python -m evals.runner --suite retrieval_math_eval
+python -m evals.runner --suite gate_eval
+python -m evals.runner --suite product_replay_eval
+python -m evals.runner --suite profile_evidence_eval
+python -m evals.runner --suite response_policy_eval
+python -m evals.runner --suite event_skill_eval
+python -m evals.runner --suite prompt_context_safety_eval
+python -m evals.runner --suite extraction_eval
+python -m evals.runner --suite write_decision_eval
+python -m evals.runner --suite retrieval_privacy_eval
+python -m evals.runner --suite v2_ingest_eval
+python -m evals.runner --suite all
 ```
 
-## Stable vs Prototype
+| Eval | Contract covered |
+| --- | --- |
+| `retrieval_math_eval` | Activation, causal relevance, and semantic gravity affect ranking. |
+| `gate_eval` | Expected memory-use actions match regression cases. |
+| `prompt_context_safety_eval` | Profile and sensitive memory stay out of direct prompt facts. |
+| `write_decision_eval` | Governance creates, rejects, reviews, supersedes, or evidence-merges correctly. |
+| `extraction_eval` | Provider-free LLM payloads validate, normalize, or reject correctly. |
+| `retrieval_privacy_eval` | Sensitive or non-promptable memories are suppressed when needed. |
+| `product_replay_eval` | The end-to-end replay remains coherent. |
+
+## Stable Boundaries
 
 | Layer | Current status |
 | --- | --- |
-| Rule extraction, write policy, use gate, prompt context | Supported local product path |
-| FastAPI endpoints and in-memory / SQLite persistence | Supported for prototypes |
-| Review queue, correction, delete, forget-all, audit export | Implemented for governance demos |
-| LLM proposal ingest | Provider-free payload parsing is wired into v2 ingest; provider-backed extraction is still prototype |
-| Benchmarks | Deterministic regression/eval seeds only, not broad personal-memory benchmark claims |
+| Rule extraction, write policy, use gate, prompt context | Supported local product path. |
+| FastAPI endpoints and JSON / SQLite persistence | Supported for prototypes. |
+| Review queue, correction, delete, forget-all, audit export | Implemented for governance demos. |
+| LLM proposal ingest | Provider-free payload parsing is wired into v2 ingest; provider-backed extraction is future work. |
+| Math runtime | Deterministic activation, anomaly, causal relevance, semantic gravity, and retrieval-v3 scoring are local explainable rules. |
+| Benchmarks | Deterministic regression seeds, not broad personal-memory benchmark claims. |
 
 ## Fit / Non-Fit
 
@@ -282,25 +320,25 @@ Good fit:
 
 | Product | Why |
 | --- | --- |
-| Personal assistants | Need durable style, events, and correction paths |
-| AI companions | Need adaptation without creepy recall |
-| Workflow agents | Need memory governance, audit, and prompt-safe context |
-| Long-running sessions | Need stale-memory suppression and forget controls |
+| Personal assistants | Need durable style, events, and correction paths. |
+| AI companions | Need adaptation without awkward private recall. |
+| Workflow agents | Need memory governance, audit, and prompt-safe context. |
+| Long-running sessions | Need stale-memory suppression and forget controls. |
 
 Poor fit:
 
 | Product | Better choice |
 | --- | --- |
-| Stateless bots | Do not add memory when output should never adapt |
-| Transcript search | Use search or RAG |
-| Uninspectable black-box memory | Use a governed store first |
-| Highly regulated production memory | Add policy review, privacy review, and red-team tests before launch |
+| Stateless bots | Do not add memory when output should never adapt. |
+| Transcript search | Use search or RAG. |
+| Uninspectable black-box memory | Use a governed store first. |
+| Highly regulated production memory | Add policy review, privacy review, encryption, migrations, and red-team tests before launch. |
 
 ## Repository Map
 
 ```text
-memory_system/   runtime, demo report, extraction, gates, retrieval, context, storage
-evals/           deterministic extraction, write, retrieval, ingest, gate, and replay evals
+memory_system/   runtime, extraction, gates, retrieval math, context, storage
+evals/           deterministic extraction, write, retrieval, ingest, gate, replay evals
 tests/           runtime, API, persistence, correction, prompt-safety tests
 examples/        runnable replay and product walkthrough
 docs/            GitHub Pages product page and design notes
@@ -312,10 +350,11 @@ demo.py          local extraction demo
 
 | Area | Next step |
 | --- | --- |
-| Evaluation | Add noisy multi-turn, stale memory, answer-quality, and privacy stress suites |
-| Extraction | Add provider-backed extraction and disagreement checks on top of the wired payload boundary |
-| Privacy | Add sensitive-memory red-team prompts, encryption, and retention policy fixtures |
-| Integration | Add chatbot, workflow, and multi-agent harness examples |
+| Calibration | Add Brier score, expected calibration error, and threshold tuning. |
+| Retrieval | Add production embeddings/vector index behind the existing scorer contract. |
+| Extraction | Add provider-backed extraction and disagreement checks on top of the wired payload boundary. |
+| Privacy | Add sensitive-memory red-team prompts, encryption, retention policy fixtures, and migration tests. |
+| Integration | Add chatbot, workflow, and multi-agent harness examples. |
 
 ## Security
 
