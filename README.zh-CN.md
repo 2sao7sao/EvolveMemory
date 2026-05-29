@@ -12,8 +12,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.11%2B-2563eb" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/tests-59%20passed-1b6f8f" alt="59 tests passed">
-  <img src="https://img.shields.io/badge/gate_eval-8%2F8-167b63" alt="Gate eval 8/8">
+  <img src="https://github.com/2sao7sao/EvolveMemory/actions/workflows/ci.yml/badge.svg" alt="CI status">
+  <img src="https://img.shields.io/badge/evals-deterministic-167b63" alt="Deterministic evals">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
 </p>
 
@@ -26,6 +26,10 @@
 EvolveMemory 把记忆设计成产品控制层：
 
 > 选择性写入，检索候选记忆，门控使用权限，编译安全 prompt context，并支持纠错和遗忘。
+
+## 核心主张
+
+Retrieval 不是 permission。被检索出来的 memory 只是候选信号，必须经过 memory-use gate 决定它能否作为直接事实、风格、follow-up、hidden constraint、clarification、summarize-only context，或者必须被 suppress。LLM extraction 也遵守同一规则：模型输出只能提出候选，确定性的 validation 和 write governance 才是写入裁决者。
 
 ![EvolveMemory adaptive replay](docs/assets/evolvememory-gate-replay.svg)
 
@@ -107,17 +111,25 @@ Replay 会写入两轮对话：
 | `style_continuity_rate` | 风格偏好是否能在相关和无关 query 中持续生效 | `SessionMemoryRuntime.query` |
 | `prompt_safety_rate` | no-mention query 是否没有注入直接可见记忆 | `PromptContextBuilder` |
 | `correction_retirement_rate` | 纠错是否退休敏感状态和派生 profile memory | `SessionMemoryRuntime.retire_memory` |
+| `extraction` | provider-free LLM payload 是否能正确 validate、normalize、reject | `LLMMemoryProposalExtractor` |
+| `write_decision` | 确定性写入治理是否正确 create、review、supersede、evidence-merge | `MemoryOperationPlanner` |
+| `privacy_actions` | retrieval/gating 是否抑制 sensitive 或 non-promptable memories | `MemoryUseGate` |
+| `v2_ingest` | `/v2/users/{user_id}/turns/ingest` 是否把 LLM payload 接入治理链路 | FastAPI v2 ingest |
 
-运行产品 eval：
-
-```bash
-python -m evals.runner --suite product_replay_eval
-```
-
-只运行 gate regression：
+运行确定性 eval：
 
 ```bash
 python -m evals.runner --suite gate_eval
+python -m evals.runner --suite product_replay_eval
+python -m evals.runner --suite profile_evidence_eval
+python -m evals.runner --suite response_policy_eval
+python -m evals.runner --suite event_skill_eval
+python -m evals.runner --suite prompt_context_safety_eval
+python -m evals.runner --suite extraction_eval
+python -m evals.runner --suite write_decision_eval
+python -m evals.runner --suite retrieval_privacy_eval
+python -m evals.runner --suite v2_ingest_eval
+python -m evals.runner --suite all
 ```
 
 ## 开发者接口
@@ -156,13 +168,45 @@ print(context["assembled_prompt"])
 
 这次升级把 EvolveMemory 从可治理 memory store 进一步推进为更完整的心智模型 runtime：
 
-| 升级点 | 变化 |
-| --- | --- |
-| Evidence-accumulated 心智模型 | Profile 扩展到 planning orientation、learning style、cognitive load、collaboration style、uncertainty tolerance、risk posture。 |
-| Procedural collaboration memory | 清单式规划、先举例、教练式追问、直接挑刺等显式协作指令会转成安全 policy guidance。 |
-| Response policy compiler 扩展 | Memory 现在可以影响 reasoning depth、example density、initiative、challenge level、personalization strength、follow-up budget。 |
-| 更多事件状态机 | Project 和 relationship event skills 加入 career、learning、life 事件，并带更严格的隐私 follow-up 规则。 |
-| 质量 eval | 新增 profile evidence、response policy、event skill、prompt-context safety 的确定性 eval。 |
+| 升级点 | 变化 | Runtime / eval |
+| --- | --- | --- |
+| Provider-free LLM proposal ingest | `/v2/users/{user_id}/turns/ingest` 支持 `extractor="llm_payload"`；payload 只会变成候选。 | `app.py`, `LLMMemoryProposalExtractor`, `v2_ingest_eval` |
+| 语义级 proposal validation | LLM payload 会 normalize 空值、升级 sensitive keys、拒绝第三方混淆、校验 tags、保留 `valid_to`。 | `LLMProposalSchemaValidator`, `extraction_eval` |
+| Evidence-accumulated 心智模型 | Profile 扩展到 planning orientation、learning style、cognitive load、collaboration style、uncertainty tolerance、risk posture。 | `ProfileEvidenceExtractor`, `profile_evidence_eval` |
+| Procedural collaboration memory | 清单式规划、先举例、教练式追问、直接挑刺等显式协作指令会转成安全 policy guidance。 | `ResponsePolicyEngine`, `response_policy_eval` |
+| Response policy compiler 扩展 | Memory 现在可以影响 reasoning depth、example density、initiative、challenge level、personalization strength、follow-up budget。 | `PromptContextBuilder`, `prompt_context_safety_eval` |
+| 更多事件状态机 | Project 和 relationship event skills 加入 career、learning、life 事件，并带更严格的隐私 follow-up 规则。 | `EventSkillRegistry`, `event_skill_eval` |
+| Privacy and write evals | 确定性 suites 覆盖 extraction、write decisions、retrieval privacy、v2 ingest。 | `write_decision_eval`, `retrieval_privacy_eval` |
+
+## Provider-Free LLM Proposal Ingest
+
+Runtime 现在可以接收模型产出的 proposal payload，不需要 provider 或网络调用。LLM 边界不是 writer：payload 会先被解析成候选 `MemoryRecord`，再由确定性写入治理决定 create、merge、review、reject 或 evidence-only update。
+
+```json
+{
+  "session_id": "demo-session",
+  "role": "user",
+  "text": "回答直接一点。",
+  "options": {
+    "extractor": "llm_payload",
+    "llm_payload": {
+      "candidate_memories": [
+        {
+          "layer": "preference",
+          "key": "communication_style",
+          "value": "direct",
+          "confidence": 0.9,
+          "authority": "user_explicit",
+          "sensitivity": "personal",
+          "evidence": "回答直接一点"
+        }
+      ]
+    }
+  }
+}
+```
+
+非法 payload 返回 HTTP 422；sensitive 或 restricted candidates 仍会按策略进入 review queue。
 
 ## API 形态
 
@@ -227,8 +271,8 @@ flowchart LR
 | Rule extraction、write policy、use gate、prompt context | 当前支持的本地产品路径 |
 | FastAPI endpoints、in-memory / SQLite persistence | 支持 prototype |
 | Review queue、correction、delete、forget-all、audit export | 已实现治理 demo |
-| LLM extraction | 有 schema 和 validator；provider-backed extraction 仍是 prototype |
-| Benchmarks | regression seeds，不是大规模 personal-memory benchmark |
+| LLM proposal ingest | Provider-free payload parsing 已接入 v2 ingest；provider-backed extraction 仍是 prototype |
+| Benchmarks | deterministic regression/eval seeds，不是大规模 personal-memory benchmark |
 
 ## 适合 / 不适合
 
@@ -254,7 +298,7 @@ flowchart LR
 
 ```text
 memory_system/   runtime、demo report、extraction、gates、retrieval、context、storage
-evals/           gate 和 product replay evaluation runners
+evals/           extraction、write、retrieval、ingest、gate、replay 的确定性 evals
 tests/           runtime、API、persistence、correction、prompt-safety tests
 examples/        可运行 replay 和产品 walkthrough
 docs/            GitHub Pages 产品页和设计说明
@@ -266,9 +310,9 @@ demo.py          本地抽取 demo
 
 | 方向 | 下一步 |
 | --- | --- |
-| Evaluation | 增加 noisy multi-turn、stale memory、correction、privacy stress suites |
-| Extraction | 增加 provider-backed extraction、schema validation 和 disagreement checks |
-| Privacy | 增加 sensitive-memory red-team prompts 和 retention policy fixtures |
+| Evaluation | 增加 noisy multi-turn、stale memory、answer-quality、privacy stress suites |
+| Extraction | 在已接入的 payload boundary 之上增加 provider-backed extraction 和 disagreement checks |
+| Privacy | 增加 sensitive-memory red-team prompts、encryption 和 retention policy fixtures |
 | Integration | 增加 chatbot、workflow、multi-agent harness examples |
 
 ## Security

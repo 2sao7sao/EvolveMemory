@@ -1,0 +1,3 @@
+{"id":"sensitive_unrelated_suppressed","query":"给我一点求职建议","memories":[{"type":"state","key":"age","value":"29","evidence":"29岁","tags":["sensitive"],"sensitivity":"sensitive"}],"expected_actions":{"age":"suppress"}}
+{"id":"profile_style_only_non_leakage","query":"帮我 review 代码","memories":[{"type":"profile","key":"learning_style","value":"example_first","evidence":"先举例","allowed_use":["style"],"sensitivity":"personal"}],"expected_actions":{"learning_style":"style_only"}}
+{"id":"never_prompt_suppressed","query":"这个信息可以用吗？","memories":[{"type":"state","key":"private_note","value":"do_not_surface","evidence":"private","allowed_use":["never_prompt"],"sensitivity":"restricted"}],"expected_actions":{"private_note":"suppress"}}

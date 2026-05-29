@@ -12,8 +12,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.11%2B-2563eb" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/tests-59%20passed-1b6f8f" alt="59 tests passed">
-  <img src="https://img.shields.io/badge/gate_eval-8%2F8-167b63" alt="Gate eval 8/8">
+  <img src="https://github.com/2sao7sao/EvolveMemory/actions/workflows/ci.yml/badge.svg" alt="CI status">
+  <img src="https://img.shields.io/badge/evals-deterministic-167b63" alt="Deterministic evals">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
 </p>
 
@@ -27,6 +27,10 @@ assistant sound like it is dragging old private details into every answer.
 EvolveMemory treats memory as a product control layer:
 
 > Remember selectively. Retrieve candidates. Gate permission. Compile safe prompt context. Correct or forget on demand.
+
+## Core Thesis
+
+Retrieval is not permission. A retrieved memory is only a candidate signal until the memory-use gate decides whether it may shape direct facts, style, follow-up, hidden constraints, clarification, summarize-only context, or suppression. LLM extraction follows the same rule: model output can propose candidates, but deterministic validation and write governance remain the writer of record.
 
 ![EvolveMemory adaptive replay](docs/assets/evolvememory-gate-replay.svg)
 
@@ -109,17 +113,25 @@ The product path retires both the sensitive state and its derived profile signal
 | `style_continuity_rate` | Whether style preferences remain useful across relevant and unrelated queries | `SessionMemoryRuntime.query` |
 | `prompt_safety_rate` | Whether no direct visible memory is injected for the no-mention query | `PromptContextBuilder` |
 | `correction_retirement_rate` | Whether correction retires sensitive state and derived profile memory | `SessionMemoryRuntime.retire_memory` |
+| `extraction` | Whether provider-free LLM payloads validate, normalize, or reject correctly | `LLMMemoryProposalExtractor` |
+| `write_decision` | Whether deterministic write governance creates, reviews, supersedes, or evidence-merges | `MemoryOperationPlanner` |
+| `privacy_actions` | Whether retrieval/gating suppresses sensitive or non-promptable memories | `MemoryUseGate` |
+| `v2_ingest` | Whether `/v2/users/{user_id}/turns/ingest` routes LLM payloads through governance | FastAPI v2 ingest |
 
-Run the product eval:
-
-```bash
-python -m evals.runner --suite product_replay_eval
-```
-
-Run the gate-only regression:
+Run deterministic evals:
 
 ```bash
 python -m evals.runner --suite gate_eval
+python -m evals.runner --suite product_replay_eval
+python -m evals.runner --suite profile_evidence_eval
+python -m evals.runner --suite response_policy_eval
+python -m evals.runner --suite event_skill_eval
+python -m evals.runner --suite prompt_context_safety_eval
+python -m evals.runner --suite extraction_eval
+python -m evals.runner --suite write_decision_eval
+python -m evals.runner --suite retrieval_privacy_eval
+python -m evals.runner --suite v2_ingest_eval
+python -m evals.runner --suite all
 ```
 
 ## Developer Surface
@@ -158,13 +170,45 @@ print(context["assembled_prompt"])
 
 This release deepens EvolveMemory from a governed memory store into a richer mental-model runtime:
 
-| Upgrade | What changed |
-| --- | --- |
-| Evidence-accumulated mental models | Profiles now cover planning orientation, learning style, cognitive load, collaboration style, uncertainty tolerance, and risk posture. |
-| Procedural collaboration memory | Explicit instructions such as checklist planning, example-first explanations, coaching style, and candid critique become policy-safe guidance. |
-| Expanded response policy compiler | Memory can now shape reasoning depth, example density, initiative, challenge level, personalization strength, and follow-up budget. |
-| Broader event state machines | Project and relationship event skills join career, learning, and life events with stricter privacy-aware follow-up rules. |
-| Quality evals | New deterministic eval suites cover profile evidence, response policy, event skills, and prompt-context safety. |
+| Upgrade | What changed | Runtime / eval |
+| --- | --- | --- |
+| Provider-free LLM proposal ingest | `/v2/users/{user_id}/turns/ingest` accepts `extractor="llm_payload"`; payloads become candidates only. | `app.py`, `LLMMemoryProposalExtractor`, `v2_ingest_eval` |
+| Semantic proposal validation | LLM payloads normalize blank values, upgrade sensitive keys, reject third-party confusion, validate tags, and preserve `valid_to`. | `LLMProposalSchemaValidator`, `extraction_eval` |
+| Evidence-accumulated mental models | Profiles now cover planning orientation, learning style, cognitive load, collaboration style, uncertainty tolerance, and risk posture. | `ProfileEvidenceExtractor`, `profile_evidence_eval` |
+| Procedural collaboration memory | Explicit instructions such as checklist planning, example-first explanations, coaching style, and candid critique become policy-safe guidance. | `ResponsePolicyEngine`, `response_policy_eval` |
+| Expanded response policy compiler | Memory can now shape reasoning depth, example density, initiative, challenge level, personalization strength, and follow-up budget. | `PromptContextBuilder`, `prompt_context_safety_eval` |
+| Broader event state machines | Project and relationship event skills join career, learning, and life events with stricter privacy-aware follow-up rules. | `EventSkillRegistry`, `event_skill_eval` |
+| Privacy and write evals | Deterministic suites cover extraction, write decisions, retrieval privacy, and v2 ingest. | `write_decision_eval`, `retrieval_privacy_eval` |
+
+## Provider-Free LLM Proposal Ingest
+
+The runtime can now accept model-produced proposal payloads without requiring a provider or network call. The LLM boundary is deliberately not a writer: the payload is parsed into candidate `MemoryRecord`s, then deterministic write governance decides create, merge, review, reject, or evidence-only update.
+
+```json
+{
+  "session_id": "demo-session",
+  "role": "user",
+  "text": "回答直接一点。",
+  "options": {
+    "extractor": "llm_payload",
+    "llm_payload": {
+      "candidate_memories": [
+        {
+          "layer": "preference",
+          "key": "communication_style",
+          "value": "direct",
+          "confidence": 0.9,
+          "authority": "user_explicit",
+          "sensitivity": "personal",
+          "evidence": "回答直接一点"
+        }
+      ]
+    }
+  }
+}
+```
+
+Invalid payloads return HTTP 422, and sensitive or restricted candidates still enter the review queue when policy requires confirmation.
 
 ## API Shape
 
@@ -229,8 +273,8 @@ flowchart LR
 | Rule extraction, write policy, use gate, prompt context | Supported local product path |
 | FastAPI endpoints and in-memory / SQLite persistence | Supported for prototypes |
 | Review queue, correction, delete, forget-all, audit export | Implemented for governance demos |
-| LLM extraction | Schema and validator exist; provider-backed extraction is still prototype |
-| Benchmarks | Regression seeds only, not broad personal-memory benchmark claims |
+| LLM proposal ingest | Provider-free payload parsing is wired into v2 ingest; provider-backed extraction is still prototype |
+| Benchmarks | Deterministic regression/eval seeds only, not broad personal-memory benchmark claims |
 
 ## Fit / Non-Fit
 
@@ -256,7 +300,7 @@ Poor fit:
 
 ```text
 memory_system/   runtime, demo report, extraction, gates, retrieval, context, storage
-evals/           gate and product replay evaluation runners
+evals/           deterministic extraction, write, retrieval, ingest, gate, and replay evals
 tests/           runtime, API, persistence, correction, prompt-safety tests
 examples/        runnable replay and product walkthrough
 docs/            GitHub Pages product page and design notes
@@ -268,9 +312,9 @@ demo.py          local extraction demo
 
 | Area | Next step |
 | --- | --- |
-| Evaluation | Add noisy multi-turn, stale memory, correction, and privacy stress suites |
-| Extraction | Add provider-backed extraction with schema validation and disagreement checks |
-| Privacy | Add sensitive-memory red-team prompts and retention policy fixtures |
+| Evaluation | Add noisy multi-turn, stale memory, answer-quality, and privacy stress suites |
+| Extraction | Add provider-backed extraction and disagreement checks on top of the wired payload boundary |
+| Privacy | Add sensitive-memory red-team prompts, encryption, and retention policy fixtures |
 | Integration | Add chatbot, workflow, and multi-agent harness examples |
 
 ## Security

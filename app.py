@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -12,7 +12,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from memory_system.events import EventSkillRegistry
-from memory_system.extraction import MemoryCommand, RuleMemoryProposalExtractor, TurnPreprocessor
+from memory_system.extraction import (
+    LLMMemoryProposalExtractor,
+    LLMProposalValidationError,
+    MemoryCommand,
+    RuleMemoryProposalExtractor,
+    TurnPreprocessor,
+)
 from memory_system.models import (
     MemoryLayer,
     MemoryOperation,
@@ -60,6 +66,8 @@ class V2IngestOptions(BaseModel):
     extract_memory: bool = True
     auto_write: bool = True
     return_candidates: bool = True
+    extractor: Literal["rule", "llm_payload"] = "rule"
+    llm_payload: dict[str, Any] | None = None
 
 
 class V2IngestTurnRequest(BaseModel):
@@ -67,6 +75,7 @@ class V2IngestTurnRequest(BaseModel):
     role: str = "user"
     text: str
     timestamp: datetime | None = None
+    llm_payload: dict[str, Any] | None = None
     options: V2IngestOptions = Field(default_factory=V2IngestOptions)
 
 
@@ -455,11 +464,25 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
                 "review_required": 0,
             },
         }
-    candidates = RuleMemoryProposalExtractor().propose(
-        preprocessed_turn,
-        user_id=user_id,
-        session_id=request.session_id,
-    )
+    if request.options.extractor == "llm_payload":
+        llm_payload = request.options.llm_payload or request.llm_payload
+        if llm_payload is None:
+            raise HTTPException(status_code=422, detail="llm_payload is required when extractor='llm_payload'.")
+        try:
+            candidates = LLMMemoryProposalExtractor().parse_response_payload(
+                llm_payload,
+                turn=preprocessed_turn,
+                user_id=user_id,
+                session_id=request.session_id,
+            )
+        except LLMProposalValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    else:
+        candidates = RuleMemoryProposalExtractor().propose(
+            preprocessed_turn,
+            user_id=user_id,
+            session_id=request.session_id,
+        )
     operations = MemoryOperationPlanner().plan(
         candidates,
         existing_v2_records(
