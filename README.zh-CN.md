@@ -1,5 +1,3 @@
-<img src="assets/evolvememory-math-runtime-hero.png" alt="EvolveMemory 数学记忆运行时主视觉" width="100%" />
-
 <p align="center">
   <a href="./README.md">English</a>
   ·
@@ -43,7 +41,7 @@ user turn
   -> correction / audit / evals
 ```
 
-<img src="assets/mode_matrix.svg" alt="EvolveMemory runtime 模式：observe、write、retrieve、adapt、correct、audit" width="100%" />
+<img src="assets/runtime_contract_map_v2.svg" alt="EvolveMemory runtime 模式：observe、write、retrieve、adapt、correct、audit" width="100%" />
 
 | Runtime 边界 | 契约 |
 | --- | --- |
@@ -102,7 +100,7 @@ Replay 会写入两轮用户输入：
 
 最后模拟一次纠错：用户不希望系统记住焦虑。runtime 会同时退休敏感状态和派生 profile 信号。
 
-<img src="docs/assets/evolvememory-gate-replay.svg" alt="Replay 证明 gate、suppression、style continuity 和 correction" width="100%" />
+<img src="docs/assets/replay_gate_summary_v2.svg" alt="Replay 证明 gate、suppression、style continuity 和 correction" width="100%" />
 
 ## Mathematical Runtime
 
@@ -199,7 +197,7 @@ temporal_anomaly =
 这样 recency 和状态风险不会混在一起：普通偏好可以长期安静存在，反复出现的流动状态会在必要时保持可见，
 用于谨慎 follow-up 或 review。
 
-<img src="assets/state_temporal_anomaly_model.svg" alt="状态时间异常模型：TTL、复发、异常分数和阶段转移" width="100%" />
+<img src="assets/activation_model_v2.svg" alt="状态时间异常模型：TTL、复发、异常分数和阶段转移" width="100%" />
 
 ### 三、Semantic Gravity
 
@@ -223,7 +221,7 @@ G_final = clamp(
 Semantic gravity 也不是 permission。它只保证高影响语境不会在进入 gate 之前丢失；最终是 mention、
 hidden、summary 还是 suppress，仍然由 use gate 决定。
 
-<img src="assets/semantic_gravity_world_knowledge.svg" alt="语义重力模型：语境补全、社会文化重力和个体调制" width="100%" />
+<img src="assets/semantic_gravity_model_v2.svg" alt="语义重力模型：语境补全、社会文化重力和个体调制" width="100%" />
 
 ### 四、Causal Relevance
 
@@ -245,7 +243,7 @@ C(m, q) = rule_risk_or_dependency(m, q)
 LLM output 永远不是 writer of record。模型可以提出 memory proposal，但 validation 和确定性写入治理
 决定每个 candidate 是 create、reject、review、supersede，还是只 merge evidence。
 
-<img src="assets/inference_validation_engine.svg" alt="推导验证引擎：搜索验证、对话验证、静默观察三条路径" width="100%" />
+<img src="assets/write_governance_model_v2.svg" alt="写入治理模型：proposal、weighted score、hard policy 和 decision paths" width="100%" />
 
 写入治理使用加权分数：
 

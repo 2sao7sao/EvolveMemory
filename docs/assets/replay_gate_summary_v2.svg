@@ -1,0 +1,40 @@
+<svg width="1200" height="480" viewBox="0 0 1200 480" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Replay gate summary</title>
+  <desc id="desc">Summary of replay behavior: follow-up, style-only, suppression, and correction.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#111827"/></marker>
+    <style>
+      .bg{fill:#fff}.panel{fill:#f8fafc;stroke:#e5e7eb}.green{fill:#ecfdf3;stroke:#9bd2b3}.blue{fill:#eef4ff;stroke:#b8c7e6}.red{fill:#fff1f0;stroke:#e7aaa3}.title{font:700 32px Inter,system-ui,sans-serif;fill:#111827}.h{font:700 18px Inter,system-ui,sans-serif;fill:#111827}.body{font:400 14px Inter,system-ui,sans-serif;fill:#475467}.mono{font:500 14px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2937}.line{stroke:#111827;stroke-width:2;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1200" height="480" rx="24" class="bg"/>
+  <text x="56" y="72" class="title">Replay proves controlled memory use</text>
+  <text x="56" y="104" class="body">The same stored memories lead to different prompt channels depending on the query.</text>
+
+  <rect x="56" y="150" width="260" height="170" rx="18" class="panel"/>
+  <text x="88" y="190" class="h">Stored memories</text>
+  <text x="88" y="228" class="mono">interview event</text>
+  <text x="88" y="258" class="mono">anxious state</text>
+  <text x="88" y="288" class="mono">direct style</text>
+
+  <line x1="316" y1="235" x2="380" y2="235" class="line"/>
+  <rect x="380" y="150" width="300" height="170" rx="18" class="green"/>
+  <text x="412" y="190" class="h">Interview query</text>
+  <text x="412" y="228" class="mono">event -> follow_up</text>
+  <text x="412" y="258" class="mono">style -> style_only</text>
+  <text x="412" y="288" class="mono">emotion -> policy_only</text>
+
+  <line x1="680" y1="235" x2="744" y2="235" class="line"/>
+  <rect x="744" y="150" width="400" height="170" rx="18" class="red"/>
+  <text x="776" y="190" class="h">Code query with no-mention</text>
+  <text x="776" y="228" class="mono">interview event -> suppress</text>
+  <text x="776" y="258" class="mono">style remains active</text>
+  <text x="776" y="288" class="mono">no direct private fact injection</text>
+
+  <rect x="56" y="364" width="1088" height="64" rx="16" class="blue"/>
+  <text x="88" y="402" class="h">Correction</text>
+  <text x="210" y="394" class="body">
+    <tspan x="210" dy="0">When the user rejects anxiety memory, the runtime retires both</tspan>
+    <tspan x="210" dy="20">the sensitive state and the derived profile signal.</tspan>
+  </text>
+</svg>

@@ -1,0 +1,64 @@
+<svg width="1200" height="680" viewBox="0 0 1200 680" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">EvolveMemory runtime contract map</title>
+  <desc id="desc">Three-lane map for write governance, retrieval gating, and prompt-safe memory use.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#1f2937"/>
+    </marker>
+    <style>
+      .bg{fill:#ffffff}.panel{fill:#f8fafc;stroke:#e5e7eb}.lane1{fill:#f4ecd6}.lane2{fill:#dceeb1}.lane3{fill:#c8e6cd}.audit{fill:#efd4d4}.card{fill:#fff;stroke:#d0d5dd}.strong{stroke:#111827;stroke-width:1.5}.title{font:700 32px Inter,system-ui,sans-serif;fill:#111827}.h{font:700 18px Inter,system-ui,sans-serif;fill:#111827}.body{font:400 14px Inter,system-ui,sans-serif;fill:#475467}.mono{font:500 13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#344054}.eyebrow{font:700 11px Inter,system-ui,sans-serif;fill:#667085;letter-spacing:.5px}.line{stroke:#111827;stroke-width:2;marker-end:url(#arrow)}.loop{stroke:#667085;stroke-width:1.5;stroke-dasharray:6 7;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1200" height="680" rx="24" class="bg"/>
+  <rect x="40" y="40" width="1120" height="600" rx="22" class="panel"/>
+  <text x="72" y="92" class="title">Memory runtime contract</text>
+  <text x="72" y="122" class="body">Retrieval ranks candidates. The use gate decides whether memory may shape the prompt.</text>
+
+  <rect x="72" y="162" width="1056" height="124" rx="18" class="lane1"/>
+  <text x="96" y="198" class="h">01 Write path</text>
+  <rect x="296" y="184" width="150" height="72" rx="12" class="card"/>
+  <text x="316" y="210" class="eyebrow">INPUT</text><text x="316" y="236" class="h">Turn</text>
+  <line x1="446" y1="220" x2="488" y2="220" class="line"/>
+  <rect x="488" y="184" width="150" height="72" rx="12" class="card"/>
+  <text x="508" y="210" class="eyebrow">PROPOSE</text><text x="508" y="236" class="h">Candidate</text>
+  <line x1="638" y1="220" x2="680" y2="220" class="line"/>
+  <rect x="680" y="184" width="150" height="72" rx="12" class="card strong"/>
+  <text x="700" y="210" class="eyebrow">GOVERN</text><text x="700" y="236" class="h">Write policy</text>
+  <line x1="830" y1="220" x2="872" y2="220" class="line"/>
+  <rect x="872" y="184" width="150" height="72" rx="12" class="card"/>
+  <text x="892" y="210" class="eyebrow">STORE</text><text x="892" y="236" class="h">Records</text>
+
+  <rect x="72" y="318" width="1056" height="124" rx="18" class="lane2"/>
+  <text x="96" y="354" class="h">02 Retrieval path</text>
+  <rect x="296" y="340" width="150" height="72" rx="12" class="card"/>
+  <text x="316" y="366" class="eyebrow">QUERY</text><text x="316" y="392" class="h">Intent plan</text>
+  <line x1="446" y1="376" x2="488" y2="376" class="line"/>
+  <rect x="488" y="340" width="150" height="72" rx="12" class="card strong"/>
+  <text x="508" y="366" class="eyebrow">RANK</text><text x="508" y="392" class="h">Score v3</text>
+  <line x1="638" y1="376" x2="680" y2="376" class="line"/>
+  <rect x="680" y="340" width="150" height="72" rx="12" class="card strong"/>
+  <text x="700" y="366" class="eyebrow">PERMIT</text><text x="700" y="392" class="h">Use gate</text>
+  <line x1="830" y1="376" x2="872" y2="376" class="line"/>
+  <rect x="872" y="340" width="150" height="72" rx="12" class="card"/>
+  <text x="892" y="366" class="eyebrow">ACTIONS</text><text x="892" y="392" class="mono">direct / style / suppress</text>
+
+  <rect x="72" y="474" width="1056" height="124" rx="18" class="lane3"/>
+  <text x="96" y="510" class="h">03 Prompt path</text>
+  <rect x="296" y="496" width="150" height="72" rx="12" class="card"/>
+  <text x="316" y="522" class="eyebrow">COMPILE</text><text x="316" y="548" class="h">Context</text>
+  <line x1="446" y1="532" x2="488" y2="532" class="line"/>
+  <rect x="488" y="496" width="150" height="72" rx="12" class="card"/>
+  <text x="508" y="522" class="eyebrow">POLICY</text><text x="508" y="548" class="h">Response</text>
+  <line x1="638" y1="532" x2="680" y2="532" class="line"/>
+  <rect x="680" y="496" width="150" height="72" rx="12" class="card"/>
+  <text x="700" y="522" class="eyebrow">MODEL</text><text x="700" y="548" class="h">Answer</text>
+  <rect x="872" y="496" width="150" height="72" rx="12" class="card"/>
+  <text x="892" y="522" class="eyebrow">AUDIT</text><text x="892" y="548" class="h">Correct</text>
+
+  <path d="M947 496V412" class="loop"/>
+  <path d="M947 340V256" class="loop"/>
+  <path d="M755 340V256" class="loop"/>
+  <rect x="72" y="612" width="1056" height="42" rx="12" class="audit"/>
+  <text x="96" y="638" class="h">Invariant</text>
+  <text x="206" y="638" class="body">A retrieved memory is only a candidate until the use gate assigns a safe prompt channel.</text>
+</svg>

@@ -1,5 +1,3 @@
-<img src="assets/evolvememory-math-runtime-hero.png" alt="EvolveMemory mathematical memory runtime hero" width="100%" />
-
 <p align="center">
   <a href="./README.zh-CN.md">简体中文</a>
   ·
@@ -46,7 +44,7 @@ user turn
   -> correction / audit / evals
 ```
 
-<img src="assets/mode_matrix.svg" alt="EvolveMemory runtime modes: observe, write, retrieve, adapt, correct, audit" width="100%" />
+<img src="assets/runtime_contract_map_v2.svg" alt="EvolveMemory runtime modes: observe, write, retrieve, adapt, correct, audit" width="100%" />
 
 | Runtime boundary | Contract |
 | --- | --- |
@@ -106,7 +104,7 @@ Then it asks two different queries:
 Finally it simulates a correction: the user does not want anxiety remembered.
 The runtime retires both the sensitive state and the derived profile signal.
 
-<img src="docs/assets/evolvememory-gate-replay.svg" alt="Replay proof for gate, suppression, style continuity, and correction" width="100%" />
+<img src="docs/assets/replay_gate_summary_v2.svg" alt="Replay proof for gate, suppression, style continuity, and correction" width="100%" />
 
 ## Mathematical Runtime
 
@@ -208,7 +206,7 @@ This separates ordinary recency from persistent state risk: a normal preference
 can quietly remain long term, while a recurring volatile state can stay visible
 for careful follow-up or review.
 
-<img src="assets/state_temporal_anomaly_model.svg" alt="State temporal anomaly model with TTL, recurrence, anomaly score, and phase transitions" width="100%" />
+<img src="assets/activation_model_v2.svg" alt="State temporal anomaly model with TTL, recurrence, anomaly score, and phase transitions" width="100%" />
 
 ### 3. Semantic Gravity
 
@@ -235,7 +233,7 @@ Semantic gravity is not permission either. It only prevents high-impact context
 from disappearing before the use gate can decide whether it should be mentioned,
 hidden, summarized, or suppressed.
 
-<img src="assets/semantic_gravity_world_knowledge.svg" alt="Semantic gravity model with context resolution, social gravity, and individual modulation" width="100%" />
+<img src="assets/semantic_gravity_model_v2.svg" alt="Semantic gravity model with context resolution, social gravity, and individual modulation" width="100%" />
 
 ### 4. Causal Relevance
 
@@ -263,7 +261,7 @@ LLM output is never the writer of record. A model can propose memories, but
 validation and deterministic write governance decide whether each candidate is
 created, rejected, reviewed, superseded, or merged as evidence.
 
-<img src="assets/inference_validation_engine.svg" alt="Inference validation engine routes inferred memory through search validation, dialog validation, or silent observation" width="100%" />
+<img src="assets/write_governance_model_v2.svg" alt="Write governance model with proposal boundary, weighted score, hard policy, and decision paths" width="100%" />
 
 Write governance uses a weighted score:
 
