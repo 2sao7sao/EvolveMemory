@@ -1,0 +1,49 @@
+<svg width="1200" height="560" viewBox="0 0 1200 560" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Semantic gravity model</title>
+  <desc id="desc">Readable formula card for semantic gravity and high-impact context retrieval.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#111827"/></marker>
+    <style>
+      .bg{fill:#fff}.panel{fill:#f8fafc;stroke:#e5e7eb}.green{fill:#ecfdf3;stroke:#9bd2b3}.blue{fill:#eef4ff;stroke:#b8c7e6}.gold{fill:#fff7e6;stroke:#e5c36c}.title{font:700 32px Inter,system-ui,sans-serif;fill:#111827}.h{font:700 18px Inter,system-ui,sans-serif;fill:#111827}.body{font:400 14px Inter,system-ui,sans-serif;fill:#475467}.mono{font:500 15px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2937}.line{stroke:#111827;stroke-width:2;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1200" height="560" rx="24" class="bg"/>
+  <text x="56" y="72" class="title">Semantic gravity protects high-impact context</text>
+  <text x="56" y="104" class="body">Weak keyword match should not hide context that changes the answer strategy.</text>
+
+  <rect x="56" y="150" width="292" height="230" rx="18" class="green"/>
+  <text x="88" y="190" class="h">1. Base gravity</text>
+  <text x="88" y="230" class="mono">exam / health     high</text>
+  <text x="88" y="260" class="mono">job transition    high</text>
+  <text x="88" y="290" class="mono">relationship      medium</text>
+  <text x="88" y="320" class="mono">style preference  lower</text>
+
+  <line x1="348" y1="265" x2="410" y2="265" class="line"/>
+  <rect x="410" y="150" width="330" height="230" rx="18" class="blue"/>
+  <text x="442" y="190" class="h">2. Social gravity</text>
+  <text x="442" y="230" class="mono">G_social = base</text>
+  <text x="442" y="260" class="mono">         * cultural_context</text>
+  <text x="442" y="290" class="mono">         * life_stage</text>
+  <text x="442" y="326" class="body">
+    <tspan x="442" dy="0">Context resolution adds rationale,</tspan>
+    <tspan x="442" dy="20">not raw private text.</tspan>
+  </text>
+
+  <line x1="740" y1="265" x2="802" y2="265" class="line"/>
+  <rect x="802" y="150" width="342" height="230" rx="18" class="gold"/>
+  <text x="834" y="190" class="h">3. Final factor</text>
+  <text x="834" y="230" class="mono">G = G_social</text>
+  <text x="834" y="260" class="mono">  * (1 + personal_importance)</text>
+  <text x="834" y="290" class="mono">  / (1 + fatigue)</text>
+  <text x="834" y="326" class="body">
+    <tspan x="834" dy="0">Still only a retrieval factor.</tspan>
+    <tspan x="834" dy="20">The gate controls visibility.</tspan>
+  </text>
+
+  <rect x="56" y="422" width="1088" height="76" rx="16" class="panel"/>
+  <text x="88" y="454" class="h">Design intent</text>
+  <text x="88" y="472" class="body">
+    <tspan x="88" dy="0">Semantic gravity lifts important candidates before permission is decided.</tspan>
+    <tspan x="88" dy="20">It does not bypass privacy, suppression, or prompt-safety policy.</tspan>
+  </text>
+</svg>
