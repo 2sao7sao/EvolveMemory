@@ -49,6 +49,10 @@ class QueryIntentClassifier:
     EMOTION_CUES = ("焦虑", "压力", "难受", "情绪", "迷茫", "崩溃")
     STYLE_CUES = ("怎么回答", "说法", "风格", "简洁", "详细", "直接", "沟通")
     MEMORY_CUES = ("记得", "记住", "忘掉", "删除记忆", "别记", "你知道我")
+    LEARNING_CUES = ("学习", "解释", "例子", "原理", "教程", "练习", "怎么理解")
+    PROJECT_CUES = ("项目", "需求", "架构", "PR", "review", "上线", "发布", "实现")
+    DECISION_CUES = ("怎么选", "帮我决定", "推荐", "取舍", "风险", "方案")
+    CODE_REVIEW_CUES = ("代码", "bug", "测试", "重构", "实现", "review")
 
     def classify(self, query: str) -> QueryIntent:
         scored = [
@@ -56,6 +60,10 @@ class QueryIntentClassifier:
             ("career_advice", self._matches(query, self.CAREER_CUES)),
             ("relationship", self._matches(query, self.RELATIONSHIP_CUES)),
             ("emotional_support", self._matches(query, self.EMOTION_CUES)),
+            ("project_work", self._matches(query, self.PROJECT_CUES)),
+            ("learning", self._matches(query, self.LEARNING_CUES)),
+            ("decision_support", self._matches(query, self.DECISION_CUES)),
+            ("code_review", self._matches(query, self.CODE_REVIEW_CUES)),
             ("style_preference", self._matches(query, self.STYLE_CUES)),
         ]
         scored.sort(key=lambda item: len(item[1]), reverse=True)
@@ -97,6 +105,33 @@ class RetrievalPlanner:
         elif intent.name == "style_preference":
             include_layers = [MemoryLayer.PREFERENCE, MemoryLayer.INFERRED_PROFILE]
             reasons.append("style queries should avoid unrelated personal facts")
+        elif intent.name == "learning":
+            include_layers = [
+                MemoryLayer.PREFERENCE,
+                MemoryLayer.INFERRED_PROFILE,
+                MemoryLayer.PROCEDURAL_MEMORY,
+            ]
+            reasons.append("learning queries benefit from mental-model and procedural style policy")
+        elif intent.name == "project_work":
+            include_layers = [
+                MemoryLayer.EPISODIC_EVENT,
+                MemoryLayer.SEMANTIC_FACT,
+                MemoryLayer.PREFERENCE,
+                MemoryLayer.INFERRED_PROFILE,
+                MemoryLayer.PROCEDURAL_MEMORY,
+            ]
+            modes.append("event_state")
+            reasons.append("project queries need event progress, workflow preferences, and policy guidance")
+        elif intent.name == "decision_support":
+            include_layers = [MemoryLayer.PREFERENCE, MemoryLayer.INFERRED_PROFILE]
+            reasons.append("decision queries need recommendation and uncertainty-tolerance policy")
+        elif intent.name == "code_review":
+            include_layers = [
+                MemoryLayer.PREFERENCE,
+                MemoryLayer.INFERRED_PROFILE,
+                MemoryLayer.PROCEDURAL_MEMORY,
+            ]
+            reasons.append("code-review queries should retrieve collaboration and critique policy")
         elif intent.name == "memory_management":
             include_layers = []
             reasons.append("memory-management queries need broad inspection")

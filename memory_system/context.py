@@ -101,6 +101,24 @@ class ContextCompiler:
             return "Answer directly while staying warm."
         if memory.key == "explanation_structure" and memory.value == "step_by_step":
             return "Use step-by-step structure when explaining."
+        if memory.key in {"planning_preference", "planning_orientation"}:
+            return "Prefer checklist-style plans with clear next actions."
+        if memory.key in {"learning_preference", "learning_style"} and memory.value == "example_first":
+            return "Introduce concepts through examples before abstraction."
+        if memory.key in {"learning_preference", "learning_style"} and memory.value == "principle_first":
+            return "Explain the underlying principle before examples."
+        if memory.key in {"collaboration_preference", "collaboration_style"} and memory.value == "socratic":
+            return "Use a coaching style with at most two focused questions."
+        if memory.key in {"collaboration_preference", "collaboration_style"} and memory.value == "challenge":
+            return "Offer candid critique and call out weak assumptions."
+        if memory.key == "cognitive_load_preference" and memory.value == "low_load":
+            return "Reduce cognitive load with shorter sections and fewer branches."
+        if memory.key == "cognitive_load_preference" and memory.value == "deep_dive":
+            return "A deeper explanation is acceptable when useful."
+        if memory.key == "uncertainty_tolerance" and memory.value == "low":
+            return "Reduce ambiguity by giving a clear recommendation."
+        if memory.key == "risk_posture" and memory.value == "risk_averse":
+            return "Prefer safer options and make tradeoffs explicit."
         if memory.key == "current_emotional_state":
             return "Keep tone calm; do not mention emotional-state memory unless asked."
         return f"Use {memory.key}={memory.value} as style or policy guidance only."

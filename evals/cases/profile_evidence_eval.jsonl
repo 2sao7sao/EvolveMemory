@@ -1,0 +1,4 @@
+{"id":"planning_checklist","turns":["给我清单。","用清单列步骤。"],"expected_evidence":[{"dimension":"planning_orientation","value":"prefers_checklists"}]}
+{"id":"learning_example_first","turns":["先举例解释。","用例子讲清楚。"],"expected_evidence":[{"dimension":"learning_style","value":"example_first"}]}
+{"id":"collaboration_challenge","turns":["帮我挑刺。","多挑战我。"],"expected_evidence":[{"dimension":"collaboration_style","value":"challenge"}]}
+{"id":"decision_uncertainty","turns":["直接给建议。","帮我决定。"],"expected_evidence":[{"dimension":"decision_style","value":"decisive"},{"dimension":"uncertainty_tolerance","value":"low"}]}

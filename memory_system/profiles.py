@@ -149,25 +149,55 @@ class ProfileEvidenceExtractor:
             return [
                 ("detail_tolerance", "low", 0.78, "support"),
                 ("detail_tolerance", "high", 0.62, "counter"),
+                ("cognitive_load_preference", "low_load", 0.66, "support"),
             ]
         if record.key == "detail_preference" and record.value == "detailed":
             return [
                 ("detail_tolerance", "high", 0.78, "support"),
                 ("detail_tolerance", "low", 0.62, "counter"),
+                ("cognitive_load_preference", "deep_dive", 0.66, "support"),
             ]
         if record.key in {"response_opening", "explanation_structure"}:
-            return [("structure_preference_level", "high", 0.72, "support")]
+            mapped = [("structure_preference_level", "high", 0.72, "support")]
+            if record.key == "explanation_structure" and record.value == "step_by_step":
+                mapped.append(("planning_orientation", "prefers_checklists", 0.68, "support"))
+            return mapped
+        if record.key == "planning_preference" and record.value == "checklist":
+            return [("planning_orientation", "prefers_checklists", 0.82, "support")]
         if record.key == "decision_preference" and record.value == "recommend":
-            return [("decision_style", "decisive", 0.74, "support")]
+            return [
+                ("decision_style", "decisive", 0.74, "support"),
+                ("uncertainty_tolerance", "low", 0.58, "support"),
+            ]
+        if record.key == "decision_preference" and record.value == "options":
+            return [
+                ("decision_style", "option_seeking", 0.7, "support"),
+                ("uncertainty_tolerance", "high", 0.56, "support"),
+                ("uncertainty_tolerance", "low", 0.5, "counter"),
+            ]
+        if record.key == "learning_preference" and record.value == "example_first":
+            return [("learning_style", "example_first", 0.8, "support")]
+        if record.key == "learning_preference" and record.value == "principle_first":
+            return [("learning_style", "principle_first", 0.78, "support")]
+        if record.key == "collaboration_preference" and record.value == "socratic":
+            return [("collaboration_style", "socratic", 0.76, "support")]
+        if record.key == "collaboration_preference" and record.value == "challenge":
+            return [("collaboration_style", "challenge", 0.76, "support")]
         if record.key == "communication_pace" and record.value == "slow":
             return [
                 ("pace_preference", "slow", 0.72, "support"),
                 ("pace_preference", "fast", 0.55, "counter"),
             ]
         if record.key == "current_bandwidth" and record.value == "busy":
-            return [("pace_preference", "fast", 0.48, "support")]
+            return [
+                ("pace_preference", "fast", 0.48, "support"),
+                ("cognitive_load_preference", "low_load", 0.62, "support"),
+            ]
         if record.key == "current_emotional_state" and record.value in {"anxious", "stressed"}:
-            return [("emotional_support_need", "elevated", 0.52, "support")]
+            return [
+                ("emotional_support_need", "elevated", 0.52, "support"),
+                ("risk_posture", "risk_averse", 0.42, "support"),
+            ]
         return []
 
 
@@ -206,15 +236,36 @@ class ProfileAccumulator:
                     counter_weight=counter_weight,
                     evidence_ids=[item.id for item in support_items],
                     counter_evidence_ids=[item.id for item in counter_items],
-                    rationale=(
-                        f"{dimension}={value} inferred from "
-                        f"{len(support_items)} supporting evidence items "
-                        f"minus {len(counter_items)} counter evidence items"
+                    rationale=self._rationale(
+                        dimension=dimension,
+                        value=value,
+                        support_items=support_items,
+                        counter_items=counter_items,
                     ),
                     supporting_quotes=[item.quote for item in support_items[:5]],
                 )
             )
         return sorted(hypotheses, key=lambda item: item.confidence, reverse=True)
+
+    def _rationale(
+        self,
+        *,
+        dimension: str,
+        value: str,
+        support_items: list[ProfileEvidence],
+        counter_items: list[ProfileEvidence],
+    ) -> str:
+        source_keys = sorted({item.source_key for item in support_items})
+        source_summary = ", ".join(source_keys[:3]) if source_keys else "profile evidence"
+        counter_summary = (
+            f" with {len(counter_items)} counter-signal(s) reducing confidence"
+            if counter_items
+            else ""
+        )
+        return (
+            f"{dimension}={value} inferred from repeated {source_summary} signals "
+            f"across {len(support_items)} supporting evidence item(s){counter_summary}"
+        )
 
     def _decayed_weight(
         self,

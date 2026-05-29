@@ -182,6 +182,12 @@ class ResponsePolicy:
     pace: str = "medium"
     empathy_level: str = "moderate"
     followup_style: str = "clarify_when_needed"
+    reasoning_depth: str = "medium"
+    example_density: str = "medium"
+    initiative_level: str = "medium"
+    challenge_level: str = "medium"
+    personalization_strength: str = "medium"
+    followup_budget: int = 1
     rationale: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -193,5 +199,11 @@ class ResponsePolicy:
             "pace": self.pace,
             "empathy_level": self.empathy_level,
             "followup_style": self.followup_style,
+            "reasoning_depth": self.reasoning_depth,
+            "example_density": self.example_density,
+            "initiative_level": self.initiative_level,
+            "challenge_level": self.challenge_level,
+            "personalization_strength": self.personalization_strength,
+            "followup_budget": self.followup_budget,
             "rationale": self.rationale,
         }

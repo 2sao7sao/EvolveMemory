@@ -1,0 +1,4 @@
+{"id":"learning_examples","memories":[{"type":"profile","key":"learning_style","value":"example_first"}],"expected_policy":{"example_density":"high"}}
+{"id":"challenge_collaboration","memories":[{"type":"profile","key":"collaboration_style","value":"challenge"}],"expected_policy":{"challenge_level":"high"}}
+{"id":"low_uncertainty","memories":[{"type":"profile","key":"uncertainty_tolerance","value":"low"}],"expected_policy":{"decision_mode":"give_recommendation","initiative_level":"high"}}
+{"id":"low_load","memories":[{"type":"profile","key":"cognitive_load_preference","value":"low_load"}],"expected_policy":{"detail_level":"low","pace":"fast","personalization_strength":"low"}}

@@ -522,8 +522,18 @@ class DialogueMemoryExtractor:
             ("多给细节", "detail_preference", "detailed", "detail_preference"),
             ("慢慢讲", "communication_pace", "slow", "communication_pace"),
             ("分步骤", "explanation_structure", "step_by_step", "explanation_structure"),
+            ("给我清单", "planning_preference", "checklist", "planning_preference"),
+            ("用清单", "planning_preference", "checklist", "planning_preference"),
             ("先给结论", "response_opening", "answer_first", "response_opening"),
             ("直接给建议", "decision_preference", "recommend", "decision_preference"),
+            ("帮我决定", "decision_preference", "recommend", "decision_preference"),
+            ("给我几个方案", "decision_preference", "options", "decision_preference"),
+            ("先举例", "learning_preference", "example_first", "learning_preference"),
+            ("用例子", "learning_preference", "example_first", "learning_preference"),
+            ("先讲原理", "learning_preference", "principle_first", "learning_preference"),
+            ("像教练一样问我", "collaboration_preference", "socratic", "collaboration_preference"),
+            ("多挑战我", "collaboration_preference", "challenge", "collaboration_preference"),
+            ("帮我挑刺", "collaboration_preference", "challenge", "collaboration_preference"),
             ("不要问太多问题", "followup_preference", "only_when_blocked", "followup_preference"),
         ]
         results: list[MemoryItem] = []
@@ -748,6 +758,17 @@ class ResponsePolicyEngine:
             "followup_preference": {
                 "only_when_blocked": ("followup_style", "only_when_blocked", "explicit preference for fewer follow-up questions"),
             },
+            "planning_preference": {
+                "checklist": ("structure", "checklist", "explicit preference for checklist planning"),
+            },
+            "learning_preference": {
+                "example_first": ("example_density", "high", "explicit preference for example-first explanations"),
+                "principle_first": ("reasoning_depth", "high", "explicit preference for principle-first explanations"),
+            },
+            "collaboration_preference": {
+                "socratic": ("initiative_level", "coaching", "explicit preference for coaching-style collaboration"),
+                "challenge": ("challenge_level", "high", "explicit preference for stronger critique"),
+            },
         }
         for key, mapping in preference_rules.items():
             memory = latest_by_key.get(key)
@@ -818,10 +839,81 @@ class ResponsePolicyEngine:
             policy.empathy_level = "high"
             policy.rationale.append("inferred profile suggests elevated need for support")
 
+        decision = latest_by_key.get("decision_style")
+        if decision and decision.value == "decisive" and policy.decision_mode == "offer_options":
+            policy.decision_mode = "give_recommendation"
+            policy.initiative_level = "high"
+            policy.rationale.append("inferred profile suggests decisions should include a recommendation")
+        if decision and decision.value == "option_seeking" and policy.decision_mode == "offer_options":
+            policy.initiative_level = "low"
+            policy.rationale.append("inferred profile suggests preserving user choice among options")
+
+        structure = latest_by_key.get("structure_preference_level")
+        if structure and structure.value == "high" and policy.structure == "balanced":
+            policy.structure = "answer_first_then_steps"
+            policy.rationale.append("inferred profile suggests structured answers work better")
+
         pace = latest_by_key.get("pace_preference")
         if pace and pace.value == "fast" and policy.pace == "medium":
             policy.pace = "fast"
             policy.rationale.append("inferred profile suggests preference for faster interaction pace")
+        if pace and pace.value == "slow" and policy.pace == "medium":
+            policy.pace = "slow"
+            policy.rationale.append("inferred profile suggests slower pacing is useful")
+
+        planning = latest_by_key.get("planning_orientation")
+        if planning and planning.value == "prefers_checklists" and policy.structure == "balanced":
+            policy.structure = "checklist"
+            policy.reasoning_depth = "medium"
+            policy.rationale.append("inferred profile suggests checklist-oriented planning")
+        if planning and planning.value == "strategy_first" and policy.reasoning_depth == "medium":
+            policy.reasoning_depth = "high"
+            policy.rationale.append("inferred profile suggests strategy before tactics")
+
+        learning = latest_by_key.get("learning_style")
+        if learning and learning.value == "example_first":
+            policy.example_density = "high"
+            policy.rationale.append("inferred profile suggests examples should come early")
+        if learning and learning.value == "principle_first":
+            policy.reasoning_depth = "high"
+            policy.rationale.append("inferred profile suggests principle-first explanations")
+
+        cognitive_load = latest_by_key.get("cognitive_load_preference")
+        if cognitive_load and cognitive_load.value == "low_load":
+            if policy.detail_level == "medium":
+                policy.detail_level = "low"
+            if policy.pace == "medium":
+                policy.pace = "fast"
+            policy.personalization_strength = "low"
+            policy.rationale.append("inferred profile suggests lower cognitive load")
+        if cognitive_load and cognitive_load.value == "deep_dive":
+            policy.detail_level = "high"
+            policy.reasoning_depth = "high"
+            policy.rationale.append("inferred profile suggests deeper explanation is welcome")
+
+        collaboration = latest_by_key.get("collaboration_style")
+        if collaboration and collaboration.value == "socratic" and policy.followup_style != "only_when_blocked":
+            policy.followup_style = "coaching_questions"
+            policy.initiative_level = "coaching"
+            policy.followup_budget = 2
+            policy.rationale.append("inferred profile suggests coaching-style collaboration")
+        if collaboration and collaboration.value == "challenge":
+            policy.challenge_level = "high"
+            policy.rationale.append("inferred profile suggests stronger critique is welcome")
+
+        uncertainty = latest_by_key.get("uncertainty_tolerance")
+        if uncertainty and uncertainty.value == "low":
+            policy.decision_mode = "give_recommendation"
+            policy.initiative_level = "high"
+            policy.rationale.append("inferred profile suggests reducing ambiguity")
+        if uncertainty and uncertainty.value == "high" and policy.reasoning_depth == "medium":
+            policy.reasoning_depth = "high"
+            policy.rationale.append("inferred profile suggests tolerance for tradeoffs")
+
+        risk = latest_by_key.get("risk_posture")
+        if risk and risk.value == "risk_averse":
+            policy.challenge_level = "gentle"
+            policy.rationale.append("inferred profile suggests highlighting safer options")
 
 
 class QueryMemoryRetriever:

@@ -31,6 +31,12 @@ class PromptContextBuilder:
             f"pace={policy.pace}",
             f"empathy_level={policy.empathy_level}",
             f"followup_style={policy.followup_style}",
+            f"reasoning_depth={policy.reasoning_depth}",
+            f"example_density={policy.example_density}",
+            f"initiative_level={policy.initiative_level}",
+            f"challenge_level={policy.challenge_level}",
+            f"personalization_strength={policy.personalization_strength}",
+            f"followup_budget={policy.followup_budget}",
         ]
         system_prompt = "\n".join(
             [

@@ -1,0 +1,3 @@
+{"id":"project_planning","record":{"key":"project_event","value":"项目需求规划","evidence":"项目需求规划"},"expected_event_types":["project.planning"]}
+{"id":"project_review","record":{"key":"project_event","value":"PR review 风险","evidence":"PR review 风险"},"expected_event_types":["project.review"]}
+{"id":"relationship_transition","record":{"key":"life_event","value":"breakup","evidence":"分手了"},"expected_event_types":["life.relationship_change","relationship.transition"]}
