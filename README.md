@@ -1,3 +1,5 @@
+<img src="assets/readme-banner.svg" alt="EvolveMemory banner" width="100%" />
+
 <p align="center">
   <a href="./README.zh-CN.md">简体中文</a>
   ·
@@ -9,10 +11,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.11%2B-2563eb" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/python-3.11%2B-ff5aa5" alt="Python 3.11+">
   <img src="https://github.com/2sao7sao/EvolveMemory/actions/workflows/ci.yml/badge.svg" alt="CI status">
-  <img src="https://img.shields.io/badge/evals-deterministic-167b63" alt="Deterministic evals">
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
+  <img src="https://img.shields.io/badge/evals-deterministic-b8eee4" alt="Deterministic evals">
+  <img src="https://img.shields.io/badge/license-MIT-ff5aa5" alt="MIT license">
 </p>
 
 # EvolveMemory
@@ -55,6 +57,17 @@ user turn
 | Gate | Decide allowed use: direct, style-only, follow-up, clarify, hidden, summary, suppress. |
 | Compile | Produce prompt-safe sections rather than raw private memory injection. |
 | Correct | Retire, delete, forget-all, or export audit evidence. |
+
+## What Ships In This Repo
+
+| Surface | What it gives you |
+| --- | --- |
+| Memory runtime | Deterministic local engine for ingest, retrieval, gating, prompt context, correction, and audit. |
+| FastAPI service | v2 endpoints for turn ingest, memory query, prompt context, review queue, correction, forget-all, and export. |
+| Math model | Inspectable scoring objects for retrieval, activation, semantic gravity, causal relevance, and write decisions. |
+| Governance | Write policy, sensitivity checks, review paths, correction retirement, and audit evidence. |
+| Evals | Regression suites for extraction, write decisions, gate actions, privacy, prompt safety, and replay coherence. |
+| Product docs | GitHub Pages, replay examples, diagrams, and design review notes. |
 
 ## 5-Minute Replay
 

@@ -1,3 +1,5 @@
+<img src="assets/readme-banner.svg" alt="EvolveMemory banner" width="100%" />
+
 <p align="center">
   <a href="./README.md">English</a>
   ·
@@ -9,10 +11,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.11%2B-2563eb" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/python-3.11%2B-ff5aa5" alt="Python 3.11+">
   <img src="https://github.com/2sao7sao/EvolveMemory/actions/workflows/ci.yml/badge.svg" alt="CI status">
-  <img src="https://img.shields.io/badge/evals-deterministic-167b63" alt="Deterministic evals">
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license">
+  <img src="https://img.shields.io/badge/evals-deterministic-b8eee4" alt="Deterministic evals">
+  <img src="https://img.shields.io/badge/license-MIT-ff5aa5" alt="MIT license">
 </p>
 
 # EvolveMemory
@@ -52,6 +54,17 @@ user turn
 | Gate | 决定允许的使用方式：direct、style-only、follow-up、clarify、hidden、summary、suppress。 |
 | Compile | 编译 prompt-safe sections，而不是把私人记忆原文塞进 prompt。 |
 | Correct | 支持 retire、delete、forget-all 和 audit export。 |
+
+## 这个仓库包含什么
+
+| Surface | 作用 |
+| --- | --- |
+| Memory runtime | 本地确定性引擎，覆盖 ingest、retrieval、gating、prompt context、correction 和 audit。 |
+| FastAPI service | v2 turn ingest、memory query、prompt context、review queue、correction、forget-all、export 接口。 |
+| Math model | retrieval、activation、semantic gravity、causal relevance、write decision 的可解释评分对象。 |
+| Governance | write policy、sensitivity checks、review paths、correction retirement 和 audit evidence。 |
+| Evals | 覆盖 extraction、write decisions、gate actions、privacy、prompt safety 和 replay coherence 的回归套件。 |
+| Product docs | GitHub Pages、replay examples、diagrams 和 design review notes。 |
 
 ## 5 分钟 Replay
 
