@@ -1,0 +1,64 @@
+<svg width="1600" height="720" viewBox="0 0 1600 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="grid" width="80" height="80" patternUnits="userSpaceOnUse">
+      <path d="M80 0H0V80" stroke="#261421" stroke-opacity=".7" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="pink" x1="1000" x2="1370" y1="150" y2="520" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff8cba"/>
+      <stop offset="1" stop-color="#ff2f86"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="720" fill="#0f0b12"/>
+  <rect width="1600" height="720" fill="url(#grid)"/>
+  <rect x="72" y="62" width="1456" height="596" rx="28" fill="#140e16" stroke="#342031"/>
+  <circle cx="1280" cy="320" r="250" fill="#ff5aa5" opacity=".08"/>
+  <circle cx="1190" cy="360" r="130" fill="#b8eee4" opacity=".05"/>
+
+  <g transform="translate(116 96)">
+    <circle cx="50" cy="50" r="50" fill="#1b1219" stroke="#ff5aa5" stroke-width="4"/>
+    <ellipse cx="50" cy="47" rx="34" ry="32" fill="#5f6268"/>
+    <ellipse cx="37" cy="50" rx="15" ry="20" fill="#fff4fb"/>
+    <ellipse cx="63" cy="50" rx="15" ry="20" fill="#fff4fb"/>
+    <circle cx="39" cy="50" r="6" fill="#050507"/>
+    <circle cx="61" cy="50" r="6" fill="#050507"/>
+    <ellipse cx="50" cy="59" rx="9" ry="6" fill="#151217"/>
+    <rect x="25" y="72" width="50" height="13" rx="6.5" fill="#b8eee4"/>
+    <rect x="60" y="74" width="16" height="26" rx="6" fill="#b8eee4"/>
+    <rect x="63" y="78" width="10" height="10" rx="3" fill="#ff5aa5"/>
+    <text x="66" y="87" fill="#fff4fb" font-family="Inter, Arial, sans-serif" font-size="9" font-weight="800">e</text>
+  </g>
+
+  <text x="116" y="252" fill="#ff5aa5" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700" letter-spacing="3">7SAO DEVELOPER SYSTEMS</text>
+  <text x="112" y="342" fill="#fff4fb" font-family="Inter, Arial, sans-serif" font-size="88" font-weight="800">EvolveMemory</text>
+  <text x="118" y="398" fill="#d8c6d0" font-family="Inter, Arial, sans-serif" font-size="28">Governed adaptive memory runtime.</text>
+  <text x="118" y="446" fill="#a998a4" font-family="Inter, Arial, sans-serif" font-size="21">Write policy, retrieval math, use gates, prompt context, correction, and audit.</text>
+
+  <g font-family="Inter, Arial, sans-serif" font-size="17" font-weight="700">
+    <rect x="118" y="505" width="154" height="38" rx="19" fill="#21131d" stroke="#ff5aa5"/>
+    <text x="139" y="530" fill="#ff8cba">write policy</text>
+    <rect x="288" y="505" width="150" height="38" rx="19" fill="#21131d" stroke="#ff5aa5"/>
+    <text x="309" y="530" fill="#ff8cba">use gates</text>
+    <rect x="454" y="505" width="166" height="38" rx="19" fill="#21131d" stroke="#ff5aa5"/>
+    <text x="476" y="530" fill="#ff8cba">prompt safe</text>
+    <rect x="636" y="505" width="106" height="38" rx="19" fill="#21131d" stroke="#ff5aa5"/>
+    <text x="661" y="530" fill="#ff8cba">audit</text>
+  </g>
+
+  <g transform="translate(920 102)">
+    <rect width="520" height="476" rx="24" fill="#09070a" stroke="#3b2536"/>
+    <text x="34" y="62" fill="#ff5aa5" font-family="SFMono-Regular, Menlo, monospace" font-size="18">$ memory gate trace</text>
+    <g font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">
+      <rect x="42" y="104" width="160" height="58" rx="16" fill="#171018" stroke="#493245"/>
+      <text x="72" y="139" fill="#fff4fb">observe</text>
+      <rect x="314" y="104" width="160" height="58" rx="16" fill="#171018" stroke="#493245"/>
+      <text x="351" y="139" fill="#fff4fb">govern</text>
+      <rect x="42" y="222" width="160" height="58" rx="16" fill="#171018" stroke="#493245"/>
+      <text x="77" y="257" fill="#fff4fb">retrieve</text>
+      <rect x="314" y="222" width="160" height="58" rx="16" fill="#171018" stroke="#493245"/>
+      <text x="368" y="257" fill="#fff4fb">gate</text>
+      <rect x="178" y="348" width="168" height="62" rx="18" fill="#22131e" stroke="#ff5aa5"/>
+      <text x="219" y="386" fill="#b8eee4">adapt</text>
+    </g>
+    <path d="M206 132H302M394 166V210M314 250H206M124 280C136 342 170 374 178 378M348 378C392 354 417 320 394 288" stroke="url(#pink)" stroke-width="5" stroke-linecap="round"/>
+  </g>
+</svg>
