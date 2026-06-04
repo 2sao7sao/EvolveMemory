@@ -27,6 +27,8 @@ class WritePolicyContext:
     user_command: str | None = None
     user_consent: bool = False
     settings: UserMemorySettings = field(default_factory=UserMemorySettings)
+    scope: str | None = None
+    is_negative_preference: bool = False
 
 
 @dataclass(frozen=True)
@@ -144,6 +146,22 @@ class WeightedMemoryWriteEvaluatorV2:
                 candidate,
                 0.0,
                 "explicit do-not-remember command",
+                factors,
+            )
+        if context.is_negative_preference:
+            return self._operation(
+                MemoryOperationType.NEGATIVE_PREFERENCE,
+                candidate,
+                score,
+                "negative preference stored as suppression rule",
+                factors,
+            )
+        if context.scope in ("turn", "session") and context.user_command != "remember":
+            return self._operation(
+                MemoryOperationType.EPHEMERAL_ONLY,
+                candidate,
+                score,
+                f"scope is {context.scope}; not persisted as long-term memory",
                 factors,
             )
         if candidate.sensitivity == Sensitivity.RESTRICTED and not context.user_consent:
