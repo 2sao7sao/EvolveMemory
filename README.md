@@ -36,13 +36,16 @@ corrected or forgotten.
 ```text
 user turn
   -> proposal extraction
+  -> authority & scope resolution
   -> write governance
   -> normalized store
+  -> lifecycle / staleness engine
   -> retrieval plan
   -> hybrid math score
   -> memory-use gate
   -> response policy
-  -> prompt-safe context
+  -> memory interaction layer
+  -> prompt-safe context + dynamic controls + audit trace
   -> correction / audit / evals
 ```
 
@@ -51,10 +54,14 @@ user turn
 | Runtime boundary | Contract |
 | --- | --- |
 | Observe | Extract candidates from a turn or provider-free LLM payload. |
-| Govern | Validate, score, review, reject, merge, or supersede candidates. |
+| Authority | Resolve whether a memory is explicit command, stated fact, behavioral signal, or inference. |
+| Scope | Determine if memory applies to turn, session, project, domain, or global. |
+| Govern | Validate, score, review, reject, merge, supersede, or mark as ephemeral-only. |
 | Store | Keep normalized records, evidence, event states, settings, and audit logs. |
+| Lifecycle | Track activation, staleness, fatigue, and retirement transitions. |
 | Retrieve | Rank candidates by intent, relevance, lifecycle, causal impact, and semantic gravity. |
 | Gate | Decide allowed use: direct, style-only, follow-up, clarify, hidden, summary, suppress. |
+| Interact | Generate dynamic controls (confirm, scope-select, exception, audit) based on uncertainty. |
 | Compile | Produce prompt-safe sections rather than raw private memory injection. |
 | Correct | Retire, delete, forget-all, or export audit evidence. |
 
@@ -63,11 +70,14 @@ user turn
 | Surface | What it gives you |
 | --- | --- |
 | Memory runtime | Deterministic local engine for ingest, retrieval, gating, prompt context, correction, and audit. |
+| Authority & Scope | Resolver that distinguishes explicit commands from inferences, and turn-scoped from global preferences. |
+| Interaction layer | Dynamic controls (confirm, scope-select, exception, audit) generated from memory uncertainty. |
+| Lifecycle engine | Staleness scoring, fatigue tracking, and lifecycle transitions (active → stale → retired). |
 | FastAPI service | v2 endpoints for turn ingest, memory query, prompt context, review queue, correction, forget-all, and export. |
 | Math model | Inspectable scoring objects for retrieval, activation, semantic gravity, causal relevance, and write decisions. |
-| Governance | Write policy, sensitivity checks, review paths, correction retirement, and audit evidence. |
+| Governance | Write policy with ephemeral-only and negative-preference decisions, sensitivity checks, review paths, and audit. |
 | Evals | Regression suites for extraction, write decisions, gate actions, privacy, prompt safety, and replay coherence. |
-| Product docs | GitHub Pages, replay examples, diagrams, and design review notes. |
+| Product docs | Positioning, gate decision rules, design review notes, and development spec. |
 
 ## 5-Minute Replay
 
@@ -456,24 +466,39 @@ Poor fit:
 ## Repository Map
 
 ```text
-memory_system/   runtime, extraction, gates, retrieval math, context, storage
-evals/           deterministic extraction, write, retrieval, ingest, gate, replay evals
-tests/           runtime, API, persistence, correction, prompt-safety tests
-examples/        runnable replay and product walkthrough
-docs/            GitHub Pages product page and design notes
-app.py           FastAPI service
-demo.py          local extraction demo
+memory_system/           runtime, extraction, gates, retrieval math, context, storage
+  governance/            authority resolver, scope resolver
+  interaction/           dynamic controls, intervention decider
+  lifecycle/             staleness engine, lifecycle transitions
+evals/                   deterministic extraction, write, retrieval, ingest, gate, replay evals
+tests/                   runtime, API, persistence, correction, prompt-safety tests
+examples/                runnable replay and product walkthrough
+docs/                    positioning, gate rules, design notes, development spec
+app.py                   FastAPI service
+demo.py                  local extraction demo
 ```
 
 ## Roadmap
 
 | Area | Next step |
 | --- | --- |
-| Calibration | Add Brier score, expected calibration error, and threshold tuning. |
-| Retrieval | Add production embeddings/vector index behind the existing scorer contract. |
-| Extraction | Add provider-backed extraction and disagreement checks on top of the wired payload boundary. |
-| Privacy | Add sensitive-memory red-team prompts, encryption, retention policy fixtures, and migration tests. |
-| Integration | Add chatbot, workflow, and multi-agent harness examples. |
+| Extraction | Provider-backed LLM extraction with schema validation and repair. |
+| Authority & Scope | Expand scope resolution with multi-turn context and behavioral accumulation. |
+| Lifecycle | Add retention policy jobs, fatigue-based follow-up suppression, and clarify triggers. |
+| Interaction | End-to-end integration of dynamic controls into prompt-context response. |
+| Storage | Cross-session PostgreSQL + pgvector backend with migration CLI. |
+| Retrieval | Production embeddings, graph expansion, reranker, and usefulness feedback. |
+| Governance UX | Minimal dashboard for memory inspection, batch review, and settings. |
+| Security | Auth, tenant isolation, encryption, retention enforcement, red-team tests. |
+| Evals | 500+ cases covering authority/scope, staleness, interaction, and multilingual scenarios. |
+
+## Prototype Boundary
+
+> **This repository is a research prototype, not a hardened production service.**
+>
+> Production deployment requires: authentication, tenant isolation, field-level encryption,
+> retention policy enforcement, observability, and security red-team testing.
+> See [SECURITY.md](SECURITY.md) and [docs/positioning.md](docs/positioning.md).
 
 ## Security
 

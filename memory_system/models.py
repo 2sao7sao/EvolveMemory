@@ -18,13 +18,17 @@ class MemoryLayer(str, Enum):
     EPISODIC_EVENT = "episodic_event"
     RELATIONSHIP_GRAPH = "relationship_graph"
     PROCEDURAL_MEMORY = "procedural_memory"
+    NEGATIVE_PREFERENCE = "negative_preference"
 
 
 class MemoryStatus(str, Enum):
     CANDIDATE = "candidate"
     ACTIVE = "active"
+    NEEDS_REVIEW = "needs_review"
     STALE = "stale"
+    SUPPRESSED = "suppressed"
     SUPERSEDED = "superseded"
+    RETIRED = "retired"
     REJECTED = "rejected"
     DELETED = "deleted"
 
@@ -65,6 +69,9 @@ class MemoryRecord(BaseModel):
     tenant_id: str = "default"
     user_id: str
     session_id: str | None = None
+    project_id: str | None = None
+    domain: str | None = None
+    scope: Literal["turn", "session", "project", "domain", "global"] = "session"
     layer: MemoryLayer
     key: str
     value: Any
@@ -172,6 +179,9 @@ class MemoryOperationType(str, Enum):
     REJECT = "reject"
     ASK_USER_CONFIRMATION = "ask_user_confirmation"
     ADD_EVIDENCE_ONLY = "add_evidence_only"
+    EPHEMERAL_ONLY = "ephemeral_only"
+    NEGATIVE_PREFERENCE = "negative_preference"
+    SETTINGS_UPDATE = "settings_update"
 
 
 class MemoryOperation(BaseModel):
