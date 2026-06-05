@@ -136,23 +136,17 @@ Rules are deterministic today, but each important module emits factors,
 weights, formulas, rationale, and a version so it can later be calibrated or
 learned from feedback.
 
-`ScoreBreakdown` is the common explanation object, expressed as a structured
-math record:
+`ScoreBreakdown` is the common explanation object:
 
-$$
-\operatorname{ScoreBreakdown}_{\mathrm{retrieval}} =
-\left\{
-\begin{aligned}
-\operatorname{score} &= 0.81,\\
-\operatorname{factors} &= \{K=0.50,\ A=0.72,\ G=0.88\},\\
-\operatorname{weights} &= \{w_K=0.22,\ w_A=0.14,\ w_G=0.06\},\\
-p &= 0.81,\\
-\operatorname{formula} &= S_{\mathrm{ret},v3},\\
-\operatorname{rationale} &= \text{career query depends on current work or event state},\\
-\operatorname{version} &= \text{retrieval-v3.0}.
-\end{aligned}
-\right.
-$$
+| Field | Example value |
+| --- | --- |
+| `name` | `retrieval` |
+| `score` / `probability` | $0.81$ |
+| `factors` | $K=0.50,\ A=0.72,\ G=0.88$ |
+| `weights` | $w_K=0.22,\ w_A=0.14,\ w_G=0.06$ |
+| `formula` | $S_{\mathrm{ret},v3}$ |
+| `rationale` | Career query depends on current work or event state. |
+| `version` | `retrieval-v3.0` |
 
 Read the math runtime as one pipeline:
 
@@ -169,10 +163,10 @@ Read the math runtime as one pipeline:
 
 Retrieval ranks candidates. It still does not grant permission.
 
-$$
+```math
 \begin{aligned}
 S_{\mathrm{ret},v3}
-= \operatorname{clamp}\big(&
+= \mathrm{clamp}\big(&
 0.22K_{\mathrm{keyword}}
 + 0.22E_{\mathrm{embedding}}
 + 0.14F_{\mathrm{freshness}}\\
@@ -182,7 +176,7 @@ S_{\mathrm{ret},v3}
 &+ 0.06G_{\mathrm{gravity}}
 \big)
 \end{aligned}
-$$
+```
 
 All factors are normalized to `0..1`, and the weights sum to `1.00`. The
 score answers one question only: **which candidates should be inspected
@@ -211,29 +205,29 @@ Retrieval-v3 is intentionally hybrid:
 Some memories can be stored but should not currently affect behavior. Activation
 models lifecycle decay, reinforcement, temporal anomaly, and fatigue.
 
-$$
+```math
 \begin{aligned}
 \ell_A
 &= b_{\mathrm{lifecycle}}
-+ \log(\operatorname{confidence})
-- \lambda_{\mathrm{lifecycle}}\operatorname{age}_{\mathrm{days}}\\
++ \log(c_{\mathrm{confidence}})
+- \lambda_{\mathrm{lifecycle}}a_{\mathrm{days}}\\
 &\quad
-+ \rho\log(1+\operatorname{recurrence}_{\mathrm{count}})
++ \rho\log(1+r_{\mathrm{count}})
 + \alpha Z_{\mathrm{temporal}}
-- \phi\operatorname{fatigue},\\
+- \phi f_{\mathrm{fatigue}},\\
 A_{\mathrm{activation}}
 &= \sigma(\ell_A).
 \end{aligned}
-$$
+```
 
 The anomaly input is derived before activation:
 
-$$
+```math
 Z_{\mathrm{temporal}}
 = 0.50D_{\mathrm{duration}}
 + 0.30R_{\mathrm{recurrence}}
 + 0.20Q_{\mathrm{severity}}.
-$$
+```
 
 This separates ordinary recency from persistent state risk: a normal preference
 can quietly remain long term, while a recurring volatile state can stay visible
@@ -248,16 +242,16 @@ because lexical overlap is weak. Job loss, interviews, exams, health
 constraints, relationship transitions, and persistent emotional state can
 matter more than a generic preference.
 
-$$
+```math
 \begin{aligned}
 G_{\mathrm{social}}
-&= \operatorname{clamp}\!\left(
+&= \mathrm{clamp}\!\left(
 g_{\mathrm{base}}(k,v)
 \cdot w_{\mathrm{culture}}
 \cdot m_{\mathrm{life\ stage}}
 \right),\\
 G_{\mathrm{final}}
-&= \operatorname{clamp}\!\left(
+&= \mathrm{clamp}\!\left(
 \frac{
 G_{\mathrm{social}}\left(1+0.35I_{\mathrm{personal}}\right)
 }{
@@ -265,7 +259,7 @@ G_{\mathrm{social}}\left(1+0.35I_{\mathrm{personal}}\right)
 }
 \right).
 \end{aligned}
-$$
+```
 
 Semantic gravity is not permission either. It only prevents high-impact context
 from disappearing before the use gate can decide whether it should be mentioned,
@@ -277,9 +271,9 @@ hidden, summarized, or suppressed.
 
 Causal retrieval asks: would this memory change the safe or useful answer?
 
-$$
-C(m,q)=R_{\mathrm{risk\ or\ dependency}}(m,q).
-$$
+```math
+C(m,q)=R(m,q)
+```
 
 The current implementation is not a black-box causal model. It is an auditable
 dependency rule set: health or medication constraints score `1.00` for alcohol
@@ -303,10 +297,10 @@ created, rejected, reviewed, superseded, or merged as evidence.
 
 Write governance uses a weighted score:
 
-$$
+```math
 \begin{aligned}
 S_{\mathrm{write}}
-= \operatorname{clamp}\big(&
+= \mathrm{clamp}\big(&
 0.18C_{\mathrm{confidence}}
 + 0.16R_{\mathrm{reuse}}
 + 0.14P_{\mathrm{personalization}}\\
@@ -318,7 +312,7 @@ S_{\mathrm{write}}
 + 0.05V_{\mathrm{privacy}}
 \big)
 \end{aligned}
-$$
+```
 
 `S_write` is only the weighted part of the decision. Hard policy checks still
 override it: disabled settings reject, explicit do-not-remember rejects,
@@ -349,10 +343,10 @@ review, and contradictions may merge, supersede, or ask the user.
 
 The gate turns ranked candidates into allowed actions.
 
-$$
+```math
 \begin{aligned}
 S_{\mathrm{gate}}
-= \operatorname{clamp}\big(&
+= \mathrm{clamp}\big(&
 0.22Q_{\mathrm{relevance}}
 + 0.14F_{\mathrm{freshness}}
 + 0.14A_{\mathrm{authority}}\\
@@ -363,7 +357,7 @@ S_{\mathrm{gate}}
 + 0.06D_{\mathrm{contradiction}}
 \big)
 \end{aligned}
-$$
+```
 
 The gate is not another retrieval score. It separates usefulness from
 visibility: a high-scoring memory may still become `style_only`,
