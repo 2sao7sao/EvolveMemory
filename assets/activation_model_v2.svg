@@ -3,7 +3,7 @@
   <desc id="desc">Readable formula card for memory activation, temporal anomaly, and phase output.</desc>
   <defs>
     <style>
-      .bg{fill:#fff}.panel{fill:#f8fafc;stroke:#e5e7eb}.formula{fill:#eef4ff;stroke:#b8c7e6}.warn{fill:#fff7e6;stroke:#e5c36c}.state{fill:#ecfdf3;stroke:#9bd2b3}.title{font:700 32px Inter,system-ui,sans-serif;fill:#111827}.h{font:700 18px Inter,system-ui,sans-serif;fill:#111827}.body{font:400 14px Inter,system-ui,sans-serif;fill:#475467}.mono{font:500 16px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2937}.small{font:500 13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#344054}.rule{stroke:#d0d5dd}
+      .bg{fill:#fff}.panel{fill:#f8fafc;stroke:#e5e7eb}.formula{fill:#eef4ff;stroke:#b8c7e6}.warn{fill:#fff7e6;stroke:#e5c36c}.state{fill:#ecfdf3;stroke:#9bd2b3}.title{font:700 32px Inter,system-ui,sans-serif;fill:#111827}.h{font:700 18px Inter,system-ui,sans-serif;fill:#111827}.body{font:400 14px Inter,system-ui,sans-serif;fill:#475467}.math{font:500 17px Georgia,"Times New Roman",serif;fill:#1f2937}.math-small{font:500 15px Georgia,"Times New Roman",serif;fill:#344054}.sub{font-size:70%;baseline-shift:sub}.rule{stroke:#d0d5dd}
     </style>
   </defs>
   <rect width="1200" height="560" rx="24" class="bg"/>
@@ -12,17 +12,17 @@
 
   <rect x="56" y="136" width="620" height="220" rx="18" class="formula"/>
   <text x="88" y="176" class="h">Activation score</text>
-  <text x="88" y="216" class="mono">log_A = base[lifecycle]</text>
-  <text x="88" y="246" class="mono">      + log(confidence)</text>
-  <text x="88" y="276" class="mono">      - decay * age_days</text>
-  <text x="88" y="306" class="mono">      + recurrence_boost + anomaly_boost</text>
-  <text x="88" y="336" class="mono">      - fatigue_penalty</text>
+  <text x="88" y="216" class="math">logit(A) = b<tspan class="sub">lifecycle</tspan> + log(confidence)</text>
+  <text x="88" y="246" class="math">- λ<tspan class="sub">lifecycle</tspan> age<tspan class="sub">days</tspan></text>
+  <text x="88" y="276" class="math">+ ρ log(1 + recurrence<tspan class="sub">count</tspan>)</text>
+  <text x="88" y="306" class="math">+ α Z<tspan class="sub">temporal</tspan> - φ fatigue</text>
+  <text x="88" y="336" class="math">A<tspan class="sub">activation</tspan> = sigmoid(logit(A))</text>
 
   <rect x="724" y="136" width="420" height="220" rx="18" class="warn"/>
   <text x="756" y="176" class="h">Temporal anomaly</text>
-  <text x="756" y="216" class="mono">z = 0.50 * duration_ratio</text>
-  <text x="756" y="246" class="mono">  + 0.30 * recurrence</text>
-  <text x="756" y="276" class="mono">  + 0.20 * severity</text>
+  <text x="756" y="216" class="math">Z<tspan class="sub">temporal</tspan> = 0.50 D<tspan class="sub">duration</tspan></text>
+  <text x="756" y="246" class="math">+ 0.30 R<tspan class="sub">recurrence</tspan></text>
+  <text x="756" y="276" class="math">+ 0.20 Q<tspan class="sub">severity</tspan></text>
   <text x="756" y="314" class="body">
     <tspan x="756" dy="0">Persistent volatile states stay visible</tspan>
     <tspan x="756" dy="20">for review or careful follow-up.</tspan>
@@ -31,9 +31,9 @@
   <rect x="56" y="396" width="1088" height="110" rx="18" class="state"/>
   <text x="88" y="434" class="h">Output phases</text>
   <line x1="88" y1="452" x2="1112" y2="452" class="rule"/>
-  <text x="88" y="482" class="small">active</text>
-  <text x="286" y="482" class="small">extended</text>
-  <text x="504" y="482" class="small">anomalous</text>
-  <text x="742" y="482" class="small">escalated</text>
-  <text x="930" y="482" class="small">A = sigmoid(log_A)</text>
+  <text x="88" y="482" class="math-small">active</text>
+  <text x="286" y="482" class="math-small">extended</text>
+  <text x="504" y="482" class="math-small">anomalous</text>
+  <text x="742" y="482" class="math-small">escalated</text>
+  <text x="930" y="482" class="math-small">A = sigmoid(logit(A))</text>
 </svg>
