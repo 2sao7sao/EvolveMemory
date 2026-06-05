@@ -120,20 +120,22 @@ Replay 会写入两轮用户输入：
 EvolveMemory 把 memory 行为设计成可打分、可解释、可评估的决策链。当前规则是确定性的，
 但关键模块都会输出 factors、weights、formula、rationale 和 version，后续可以校准或用反馈数据训练。
 
-`ScoreBreakdown` 是统一解释对象：
+`ScoreBreakdown` 是统一解释对象，可以读成一个结构化数学记录：
 
-```python
-ScoreBreakdown(
-    name="retrieval",
-    score=0.81,
-    factors={"keyword": 0.5, "activation": 0.72, "semantic_gravity": 0.88},
-    weights={"keyword": 0.22, "activation": 0.14, "semantic_gravity": 0.06},
-    probability=0.81,
-    formula="S_ret-v3=...",
-    rationale=["career query depends on current work or event state"],
-    version="retrieval-v3.0",
-)
-```
+$$
+\operatorname{ScoreBreakdown}_{\mathrm{retrieval}} =
+\left\{
+\begin{aligned}
+\operatorname{score} &= 0.81,\\
+\operatorname{factors} &= \{K=0.50,\ A=0.72,\ G=0.88\},\\
+\operatorname{weights} &= \{w_K=0.22,\ w_A=0.14,\ w_G=0.06\},\\
+p &= 0.81,\\
+\operatorname{formula} &= S_{\mathrm{ret},v3},\\
+\operatorname{rationale} &= \text{career query depends on current work or event state},\\
+\operatorname{version} &= \text{retrieval-v3.0}.
+\end{aligned}
+\right.
+$$
 
 这套数学建模按一条流水线阅读：
 
@@ -150,17 +152,20 @@ ScoreBreakdown(
 
 Retrieval 只负责候选排序，仍然不等于 permission。
 
-```text
-S_ret_v3 = clamp(
-  0.22*K_keyword
-+ 0.22*E_embedding
-+ 0.14*F_freshness
-+ 0.14*L_layer_prior
-+ 0.14*A_activation
-+ 0.08*C_causal_relevance
-+ 0.06*G_semantic_gravity
-)
-```
+$$
+\begin{aligned}
+S_{\mathrm{ret},v3}
+= \operatorname{clamp}\big(&
+0.22K_{\mathrm{keyword}}
++ 0.22E_{\mathrm{embedding}}
++ 0.14F_{\mathrm{freshness}}\\
+&+ 0.14L_{\mathrm{layer}}
++ 0.14A_{\mathrm{activation}}
++ 0.08C_{\mathrm{causal}}\\
+&+ 0.06G_{\mathrm{gravity}}
+\big)
+\end{aligned}
+$$
 
 所有因子都归一到 `0..1`，权重和为 `1.00`。这个分数只回答一个问题：
 **哪些候选记忆应该优先被检查？** 记忆能否进入回答、以什么方式进入，仍然由 memory-use gate 决定。
@@ -187,25 +192,29 @@ Retrieval-v3 故意拆成三层：
 
 Memory 可以被存储，但不一定应该在当前时刻影响行为。Activation 控制生命周期衰减、强化、异常放大和疲劳抑制。
 
-```text
-log_A = base_prior[lifecycle]
-      + log(confidence)
-      - decay_per_day[lifecycle] * age_days
-      + reinforcement_weight * log(1 + recurrence_count)
-      + anomaly_weight * temporal_anomaly
-      - fatigue_weight * fatigue
-
-A_activation = sigmoid(log_A)
-```
+$$
+\begin{aligned}
+\ell_A
+&= b_{\mathrm{lifecycle}}
++ \log(\operatorname{confidence})
+- \lambda_{\mathrm{lifecycle}}\operatorname{age}_{\mathrm{days}}\\
+&\quad
++ \rho\log(1+\operatorname{recurrence}_{\mathrm{count}})
++ \alpha Z_{\mathrm{temporal}}
+- \phi\operatorname{fatigue},\\
+A_{\mathrm{activation}}
+&= \sigma(\ell_A).
+\end{aligned}
+$$
 
 异常分数先单独计算，再进入 activation：
 
-```text
-temporal_anomaly =
-  0.50 * duration_ratio
-+ 0.30 * recurrence_factor
-+ 0.20 * severity_prior
-```
+$$
+Z_{\mathrm{temporal}}
+= 0.50D_{\mathrm{duration}}
++ 0.30R_{\mathrm{recurrence}}
++ 0.20Q_{\mathrm{severity}}.
+$$
 
 这样 recency 和状态风险不会混在一起：普通偏好可以长期安静存在，反复出现的流动状态会在必要时保持可见，
 用于谨慎 follow-up 或 review。
@@ -217,19 +226,24 @@ temporal_anomaly =
 Semantic gravity 避免重要生活/安全语境因为词面重合弱而丢失。失业、面试、考试、健康约束、
 关系变化、持续情绪状态，通常比普通风格偏好更影响回答策略。
 
-```text
-G_social = clamp(
-  base_gravity[key_or_value]
-* cultural_context_weight
-* life_stage_modifier
-)
-
-G_final = clamp(
-  G_social
-* (1 + 0.35 * personal_importance)
-/ (1 + 0.50 * fatigue)
-)
-```
+$$
+\begin{aligned}
+G_{\mathrm{social}}
+&= \operatorname{clamp}\!\left(
+g_{\mathrm{base}}(k,v)
+\cdot w_{\mathrm{culture}}
+\cdot m_{\mathrm{life\ stage}}
+\right),\\
+G_{\mathrm{final}}
+&= \operatorname{clamp}\!\left(
+\frac{
+G_{\mathrm{social}}\left(1+0.35I_{\mathrm{personal}}\right)
+}{
+1+0.50F_{\mathrm{fatigue}}
+}
+\right).
+\end{aligned}
+$$
 
 Semantic gravity 也不是 permission。它只保证高影响语境不会在进入 gate 之前丢失；最终是 mention、
 hidden、summary 还是 suppress，仍然由 use gate 决定。
@@ -240,9 +254,9 @@ hidden、summary 还是 suppress，仍然由 use gate 决定。
 
 Causal retrieval 问的是：这条 memory 会不会改变安全或有用的回答？
 
-```text
-C(m, q) = rule_risk_or_dependency(m, q)
-```
+$$
+C(m,q)=R_{\mathrm{risk\ or\ dependency}}(m,q).
+$$
 
 当前实现不是黑盒因果模型，而是可审计的规则依赖：健康/药物约束遇到喝酒问题为 `1.00`，
 职业事件遇到求职问题约为 `0.90`，考试、关系、风格类 query 会按各自依赖降级。这样做的目标是先把
@@ -260,19 +274,22 @@ LLM output 永远不是 writer of record。模型可以提出 memory proposal，
 
 写入治理使用加权分数：
 
-```text
-S_write = clamp(
-  0.18*C_confidence
-+ 0.16*R_future_reuse
-+ 0.14*P_personalization_gain
-+ 0.12*T_temporal_stability
-+ 0.10*A_user_authority
-+ 0.10*E_evidence_quality
-+ 0.08*N_novelty
-+ 0.07*U_actionability
-+ 0.05*V_privacy_adjustment
-)
-```
+$$
+\begin{aligned}
+S_{\mathrm{write}}
+= \operatorname{clamp}\big(&
+0.18C_{\mathrm{confidence}}
++ 0.16R_{\mathrm{reuse}}
++ 0.14P_{\mathrm{personalization}}\\
+&+ 0.12T_{\mathrm{stability}}
++ 0.10A_{\mathrm{authority}}
++ 0.10E_{\mathrm{evidence}}\\
+&+ 0.08N_{\mathrm{novelty}}
++ 0.07U_{\mathrm{actionability}}
++ 0.05V_{\mathrm{privacy}}
+\big)
+\end{aligned}
+$$
 
 `S_write` 只是决策里的加权部分。硬策略仍然优先：settings 禁用会 reject，明确 `do_not_remember`
 会 reject，restricted memory 需要 consent，低置信 sensitive memory 需要 review，冲突记录会进入
@@ -302,18 +319,21 @@ merge、supersede 或 ask-user-confirmation。
 
 Gate 会把排序后的候选转换为允许的 action。
 
-```text
-S_gate = clamp(
-  0.22*query_relevance
-+ 0.14*freshness
-+ 0.14*authority
-+ 0.16*utility
-+ 0.14*privacy_safety
-+ 0.08*user_preference_alignment
-+ 0.06*token_efficiency
-+ 0.06*contradiction_safety
-)
-```
+$$
+\begin{aligned}
+S_{\mathrm{gate}}
+= \operatorname{clamp}\big(&
+0.22Q_{\mathrm{relevance}}
++ 0.14F_{\mathrm{freshness}}
++ 0.14A_{\mathrm{authority}}\\
+&+ 0.16U_{\mathrm{utility}}
++ 0.14P_{\mathrm{privacy}}
++ 0.08M_{\mathrm{preference}}\\
+&+ 0.06T_{\mathrm{token}}
++ 0.06D_{\mathrm{contradiction}}
+\big)
+\end{aligned}
+$$
 
 Gate 的核心不是再排序一次，而是把“可用性”和“可见性”分开：高分记忆也可能因为 privacy、allowed_use、
 用户显式 suppression 或 sensitive policy 只能进入 `style_only`、`summarize_only`，甚至 `suppress`。
