@@ -493,6 +493,8 @@ app.py                   FastAPI service
 demo.py                  local extraction demo
 ```
 
+Conversation-memory design: [Multi-turn invocation and use protocol (Chinese draft)](docs/conversation-memory-invocation-spec.md) covers recent turns, older and cross-thread evidence, long-term retrieval, query planning, profile/event/hypothesis use, latency budgets, and acceptance scenarios. It is a proposal, not an implemented runtime capability.
+
 ## Roadmap
 
 | Area | Next step |

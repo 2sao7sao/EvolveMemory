@@ -459,6 +459,8 @@ app.py           FastAPI service
 demo.py          本地抽取 demo
 ```
 
+对话记忆设计：[真实多轮对话中的记忆调用与使用协议（讨论草案）](docs/conversation-memory-invocation-spec.md)，涵盖最近原文、旧线程与跨线程证据、长期记忆检索、query 生成、画像/事件/待验证假设的使用条件、时延预算与验收场景。该文档是待讨论方案，不代表链路已经实现。
+
 ## Roadmap
 
 | 方向 | 下一步 |
