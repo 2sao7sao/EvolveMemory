@@ -10,6 +10,8 @@ EvolveMemory is the memory control plane for AI personalization: it decides what
 
 ## Target Architecture (v3)
 
+For the concrete multi-turn read path, see [Conversation Memory Invocation and Use Protocol](conversation-memory-invocation-spec.md) (Chinese discussion draft, 2026-09-04). It specifies direct recent context, older/cross-thread evidence, query construction, scoped retrieval, profile/event/hypothesis use conditions, budgets, and slice acceptance gates. Its parameters and proposed interfaces are not implemented defaults. The module statuses below describe individual modules; they do not establish end-to-end integration. See section 13 of the new draft for the `c628f00` runtime gaps.
+
 ```text
 User Turn / App Event / UI Feedback
         ↓
