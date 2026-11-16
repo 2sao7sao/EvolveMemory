@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from zoneinfo import ZoneInfo
 
 from evals.metrics import AccuracyMetric, PrecisionRecallF1Metric, RateMetric
+from memory_system.settings import UserMemorySettings
 from memory_system import (
     Authority,
     ContextCompiler,
@@ -260,7 +261,7 @@ def run_write_decision_eval(cases_dir: Path = DEFAULT_CASES_DIR) -> dict[str, ob
         operations = MemoryOperationPlanner().plan(
             candidates,
             existing,
-            WritePolicyContext(user_command=case.get("user_command")),
+            WritePolicyContext(user_command=case.get("user_command"), settings=UserMemorySettings.from_dict(case.get("settings", {}))),
         )
         actual = [operation.operation.value for operation in operations]
         expected = case["expected_operations"]
@@ -350,6 +351,7 @@ def run_v2_ingest_eval(cases_dir: Path = DEFAULT_CASES_DIR) -> dict[str, object]
         repository = NormalizedSQLiteMemoryRepository(Path(tmpdir) / "eval.sqlite3")
         extractor = LLMMemoryProposalExtractor()
         for case in _read_jsonl(cases_dir / "v2_ingest_eval.jsonl"):
+            repository.upsert_user_settings(case["user_id"], UserMemorySettings.from_dict(case.get("settings", {})))
             turn = TurnPreprocessor().preprocess(
                 text=case["turn"],
                 timestamp=timestamp,

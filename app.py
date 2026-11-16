@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from memory_system.controls import apply_read_controls, settings_allow_record
+from memory_system.governance.scope import ScopeResolver
 from memory_system.events import EventSkillRegistry
 from memory_system.extraction import (
     LLMMemoryProposalExtractor,
@@ -24,6 +26,7 @@ from memory_system.models import (
     MemoryOperation,
     MemoryOperationType,
     MemoryRecord,
+    MemoryStatus,
     Sensitivity,
 )
 from memory_system.profiles import ProfileAccumulator, ProfileEvidenceExtractor
@@ -72,6 +75,9 @@ class V2IngestOptions(BaseModel):
 
 class V2IngestTurnRequest(BaseModel):
     session_id: str | None = None
+    project_id: str | None = Field(None, min_length=1)
+    domain: str | None = Field(None, min_length=1)
+    memory_scope: Literal["turn", "session", "project", "domain", "global"] | None = None
     role: str = "user"
     text: str
     timestamp: datetime | None = None
@@ -86,6 +92,8 @@ class V2QueryOptions(BaseModel):
 
 class V2MemoryQueryRequest(BaseModel):
     session_id: str | None = None
+    project_id: str | None = Field(None, min_length=1)
+    domain: str | None = Field(None, min_length=1)
     query: str
     timestamp: datetime | None = None
     options: V2QueryOptions = Field(default_factory=V2QueryOptions)
@@ -98,6 +106,8 @@ class V2ResolveReviewRequest(BaseModel):
 
 class V2MemorySettingsRequest(BaseModel):
     memory_enabled: bool | None = None
+    enabled_project_ids: list[str] | None = None
+    allow_global_memory: bool | None = None
     allow_inferred_profile: bool | None = None
     allow_sensitive_memory: bool | None = None
     allow_event_followup: bool | None = None
@@ -106,6 +116,11 @@ class V2MemorySettingsRequest(BaseModel):
     disabled_layers: list[MemoryLayer] | None = None
     review_required_for_sensitivity: list[Sensitivity] | None = None
     review_required_for_layers: list[MemoryLayer] | None = None
+
+
+class V2EventFollowupRequest(BaseModel):
+    enabled: bool
+    timestamp: datetime | None = None
 
 
 class V2ForgetAllRequest(BaseModel):
@@ -233,16 +248,40 @@ def settings_from_request(
     return UserMemorySettings.from_dict(payload)
 
 
-def existing_v2_records(
-    *,
-    user_id: str,
-    session_id: str | None,
-) -> list[MemoryRecord]:
-    return build_normalized_repository().list_records(
-        user_id=user_id,
-        session_id=session_id,
-        limit=200,
-    )
+def scoped_v2_records(repository: Any, *, user_id: str, session_id: str | None,
+                      project_id: str | None, domain: str | None,
+                      settings: UserMemorySettings,
+                      status: MemoryStatus | None = MemoryStatus.ACTIVE) -> list[MemoryRecord]:
+    # These identifiers are supplied by the trusted host, not inferred from a query.
+    scopes = ["session"]
+    if project_id is not None and project_id in settings.enabled_project_ids:
+        scopes.append("project")
+    if domain is not None and (project_id is None or project_id in settings.enabled_project_ids):
+        scopes.append("domain")
+    if settings.allow_global_memory:
+        scopes.append("global")
+    result: dict[str, MemoryRecord] = {}
+    for scope in scopes:
+        for record in repository.list_records_scoped(
+            user_id=user_id, scope=scope, session_id=session_id,
+            project_id=project_id, domain=domain, status=status, limit=200,
+        ):
+            result[str(record.id)] = record
+    return list(result.values())
+
+
+def resolve_ingest_scope(request: V2IngestTurnRequest, settings: UserMemorySettings) -> tuple[str, str | None]:
+    detected, confidence = ScopeResolver().resolve(candidate={}, text=request.text)
+    # Natural language may narrow a host scope, but never grant project/global sharing.
+    temporary = detected.value if confidence >= 0.9 and detected.value in {"turn", "session"} else None
+    scope = temporary or request.memory_scope or "session"
+    if scope == "project" and (not request.project_id or request.project_id not in settings.enabled_project_ids):
+        raise HTTPException(status_code=422, detail="Project memory requires an enabled project_id.")
+    if scope == "domain" and (not request.domain or (request.project_id is not None and request.project_id not in settings.enabled_project_ids)):
+        raise HTTPException(status_code=422, detail="Domain memory requires a domain and an enabled project when supplied.")
+    if scope == "global" and not settings.allow_global_memory:
+        raise HTTPException(status_code=422, detail="Global memory sharing is not enabled.")
+    return scope, temporary or ("turn" if scope == "turn" else None)
 
 
 def record_to_memory_item(record: MemoryRecord) -> MemoryItem:
@@ -274,6 +313,10 @@ def record_to_memory_item(record: MemoryRecord) -> MemoryItem:
         allowed_use=[item.value for item in record.allowed_use],
         sensitivity=record.sensitivity.value,
         memory_id=str(record.id),
+        tenant_id=record.tenant_id, user_id=record.user_id, session_id=record.session_id,
+        project_id=record.project_id, domain=record.domain, scope=record.scope,
+        authority=record.authority.value, source_turn_ids=list(record.source_turn_ids),
+        source_text_hash=record.source_text_hash, metadata=dict(record.metadata),
     )
 
 
@@ -431,7 +474,6 @@ def memory_slots() -> dict[str, Any]:
 def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]:
     timestamp = normalize_timestamp(request.timestamp)
     turn_id = f"turn_{uuid4().hex[:12]}"
-    runtime = manager.get(v2_session_key(user_id, request.session_id))
     normalized_repository = build_normalized_repository()
     settings = normalized_repository.get_user_settings(user_id)
     preprocessed_turn = TurnPreprocessor().preprocess(
@@ -483,12 +525,18 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
             user_id=user_id,
             session_id=request.session_id,
         )
+    scope, temporary_scope = resolve_ingest_scope(request, settings)
+    for candidate in candidates:
+        candidate.project_id = request.project_id if scope != "global" else None
+        candidate.domain = request.domain if scope != "global" else None
+        candidate.scope = scope
+    existing_records = scoped_v2_records(
+        normalized_repository, user_id=user_id, session_id=request.session_id,
+        project_id=request.project_id, domain=request.domain, settings=settings,
+    )
     operations = MemoryOperationPlanner().plan(
         candidates,
-        existing_v2_records(
-            user_id=user_id,
-            session_id=request.session_id,
-        ),
+        existing_records,
         WritePolicyContext(
             user_command=(
                 preprocessed_turn.memory_command.value
@@ -496,10 +544,11 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
                 else None
             ),
             settings=settings,
+            scope=temporary_scope,
         ),
     )
     event_states = EventSkillRegistry().detect(candidates)
-    can_v2_autowrite = request.options.auto_write and preprocessed_turn.memory_command not in {
+    can_v2_autowrite = settings.memory_enabled and request.options.auto_write and temporary_scope is None and preprocessed_turn.memory_command not in {
         MemoryCommand.DO_NOT_REMEMBER,
         MemoryCommand.FORGET,
     }
@@ -511,67 +560,59 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
     persisted_active_ids = {
         record.id for record in persisted_records if record.status.value == "active"
     }
+    for event in event_states:
+        event.followup_policy.enabled = False
     persisted_event_states = [
         normalized_repository.upsert_event_state(event, user_id=user_id)
         for event in event_states
-        if event.memory_id in persisted_active_ids and settings.allow_event_followup
+        if event.memory_id in persisted_active_ids
     ]
-    profile_source_records = [
-        operation.candidate
-        for operation in operations
-        if operation.operation
-        in {
-            MemoryOperationType.CREATE,
-            MemoryOperationType.SUPERSEDE,
-            MemoryOperationType.MERGE,
-            MemoryOperationType.UPDATE,
-            MemoryOperationType.ADD_EVIDENCE_ONLY,
-        }
-        and not operation.requires_user_review
-    ]
+    # Only successful governed writes may create profile evidence. Dry runs,
+    # opt-out and ephemeral instructions must not leave derived side effects.
+    persisted_active = {record.id: record for record in persisted_records if record.status == MemoryStatus.ACTIVE}
+    profile_source_records = []
+    for operation in operations:
+        target_id = operation.target_memory_id or operation.candidate.id
+        if target_id not in persisted_active or operation.requires_user_review:
+            continue
+        # Quote this actual user turn, linked to the canonical persisted record.
+        source = operation.candidate.model_copy(deep=True)
+        source.id = target_id
+        source.source_turn_ids = [turn_id]
+        profile_source_records.append(source)
     profile_evidence = (
         ProfileEvidenceExtractor().extract(profile_source_records)
-        if settings.allow_inferred_profile
+        if can_v2_autowrite and settings.allows_layer(MemoryLayer.INFERRED_PROFILE)
         else []
     )
-    normalized_repository.add_profile_evidence_batch(profile_evidence)
-    profile_candidates = [
-        hypothesis.to_record(
-            user_id=user_id,
-            session_id=request.session_id,
-            observed_at=timestamp,
-        )
-        for hypothesis in ProfileAccumulator().accumulate(
-            normalized_repository.list_profile_evidence(user_id=user_id)
-        )
-    ]
+    profile_evidence = normalized_repository.add_profile_evidence_batch(profile_evidence)
+    allowed_sources = {
+        str(record.id): record for record in apply_read_controls(
+            scoped_v2_records(
+                normalized_repository, user_id=user_id, session_id=request.session_id,
+                project_id=request.project_id, domain=request.domain, settings=settings,
+            ), settings,
+        ) if record.scope == scope and record.layer != MemoryLayer.INFERRED_PROFILE and (record.valid_from <= timestamp and record_to_memory_item(record).is_active(timestamp))
+    }
+    evidence_pool = [
+        evidence for evidence in normalized_repository.list_profile_evidence(user_id=user_id)
+        if str(evidence.source_memory_id) in allowed_sources
+    ] if profile_evidence else []
+    profile_candidates = []
+    for hypothesis in ProfileAccumulator().accumulate(evidence_pool):
+        record = hypothesis.to_record(user_id=user_id, session_id=request.session_id, observed_at=timestamp)
+        record.project_id = request.project_id if scope != "global" else None
+        record.domain = request.domain if scope != "global" else None
+        record.scope = scope
+        ids = set(hypothesis.evidence_ids)
+        record.metadata["source_memory_ids"] = sorted({str(e.source_memory_id) for e in evidence_pool if e.id in ids})
+        profile_candidates.append(record)
     profile_operations = MemoryOperationPlanner().plan(
-        profile_candidates,
-        existing_v2_records(user_id=user_id, session_id=request.session_id),
-        WritePolicyContext(settings=settings),
+        profile_candidates, existing_records, WritePolicyContext(settings=settings, scope=temporary_scope),
     )
     persisted_profile_records = (
         normalized_repository.apply_operations(profile_operations, created_at=timestamp)
-        if can_v2_autowrite
-        else []
-    )
-    can_legacy_autowrite = (
-        request.options.auto_write
-        and preprocessed_turn.memory_command
-        not in {
-            MemoryCommand.DO_NOT_REMEMBER,
-            MemoryCommand.FORGET,
-        }
-        and not any(operation.requires_user_review for operation in operations)
-    )
-    result = (
-        runtime.ingest_turn(request.text, source=turn_id, timestamp=timestamp)
-        if can_legacy_autowrite
-        else {
-            "accepted_memories": [],
-            "accepted_inferred_memories": [],
-            "write_decisions": [],
-        }
+        if can_v2_autowrite else []
     )
     return {
         "turn_id": turn_id,
@@ -603,160 +644,74 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
             record_to_dict(record) for record in persisted_profile_records
         ],
         "persisted_records": [record_to_dict(record) for record in persisted_records],
-        "active_memory_delta": v2_active_memory_delta(operations),
-        "legacy_active_memory_delta": {
-            "created": len(result["accepted_memories"]) + len(result["accepted_inferred_memories"]),
-            "updated": 0,
-            "rejected": len(
-                [decision for decision in result["write_decisions"] if not decision["should_write"]]
-            ),
-            "review_required": 0,
+        "active_memory_delta": {
+            **v2_active_memory_delta(operations),
+            **({"created": 0, "updated": 0} if not can_v2_autowrite else {}),
         },
+        "legacy_active_memory_delta": {"created": 0, "updated": 0, "rejected": 0, "review_required": 0},
+        "storage_path": "normalized_only",
     }
+
+
+def prepare_v2_query(user_id: str, request: V2MemoryQueryRequest) -> tuple[SessionMemoryRuntime, dict[str, Any], dict[str, Any]]:
+    timestamp = normalize_timestamp(request.timestamp)
+    plan = RetrievalPlanner().plan(request.query, max_prompt_memories=request.options.max_prompt_memories)
+    repository = build_normalized_repository()
+    settings = repository.get_user_settings(user_id)
+    runtime = SessionMemoryRuntime()  # Never implicitly load a legacy session.
+    records = []
+    event_states = []
+    if settings.memory_enabled:
+        records = apply_read_controls(scoped_v2_records(
+            repository, user_id=user_id, session_id=request.session_id,
+            project_id=request.project_id, domain=request.domain, settings=settings,
+        ), settings)
+        # Use the same time snapshot for sources and their derived profiles.
+        records = [record for record in records if (record.valid_from <= timestamp and record_to_memory_item(record).is_active(timestamp))]
+        # An approved profile cannot outlive its governed supporting records.
+        visible_ids = {str(record.id) for record in records}
+        records = [record for record in records if record.layer != MemoryLayer.INFERRED_PROFILE
+                   or all(source in visible_ids for source in record.metadata.get("source_memory_ids", []))]
+        if plan.include_layers:
+            records = [record for record in records if record.layer in plan.include_layers]
+        visible_ids = {record.id for record in records}
+        event_states = [event for event in repository.list_event_states(user_id=user_id, limit=10000)
+                        if event.memory_id in visible_ids]
+    result = query_v2_records(
+        runtime, query_text=request.query, timestamp=timestamp,
+        limit=request.options.max_prompt_memories, records=records, plan=plan, event_states=event_states,
+    )
+    payload = plan.to_dict()
+    payload.update(max_prompt_memories=request.options.max_prompt_memories,
+                   include_debug=request.options.include_debug)
+    if not settings.memory_enabled:
+        payload.update(retrieval_modes=[], reasons=["memory_disabled"])
+    if not request.options.include_debug:
+        result["memory_gate"]["suppressed"] = []
+    return runtime, result, payload
 
 
 @app.post("/v2/users/{user_id}/memory/query")
 def v2_memory_query(user_id: str, request: V2MemoryQueryRequest) -> dict[str, Any]:
-    timestamp = normalize_timestamp(request.timestamp)
-    retrieval_plan = RetrievalPlanner().plan(
-        request.query,
-        max_prompt_memories=request.options.max_prompt_memories,
-    )
-    repository = build_normalized_repository()
-    if not repository.get_user_settings(user_id).memory_enabled:
-        # Use an empty, non-persistent runtime so neither normalized records nor
-        # the legacy session fallback can contribute memory after opt-out.
-        result = SessionMemoryRuntime().query(
-            request.query, timestamp=timestamp, limit=request.options.max_prompt_memories,
-        )
-        plan_payload = retrieval_plan.to_dict()
-        plan_payload.update(
-            retrieval_modes=[],
-            reasons=["memory_disabled"],
-            max_prompt_memories=request.options.max_prompt_memories,
-            include_debug=request.options.include_debug,
-        )
-        return {
-            "retrieval_plan": plan_payload,
-            "candidates": result["relevant_memories"],
-            "gate": result["memory_gate"],
-            "compiled_context": result["compiled_context"],
-            "response_policy": result["response_policy"],
-        }
-    runtime = manager.get(v2_session_key(user_id, request.session_id))
-    all_normalized_records = repository.list_records(
-        user_id=user_id,
-        session_id=request.session_id,
-        status=None,
-        limit=200,
-    )
-    normalized_records = repository.list_records(
-        user_id=user_id,
-        session_id=request.session_id,
-        limit=200,
-    )
-    event_states = repository.list_event_states(user_id=user_id, limit=200)
-    planned_records = (
-        [
-            record
-            for record in normalized_records
-            if record.layer in retrieval_plan.include_layers
-        ]
-        if retrieval_plan.include_layers
-        else normalized_records
-    )
-    result = (
-        query_v2_records(
-            runtime,
-            query_text=request.query,
-            timestamp=timestamp,
-            limit=request.options.max_prompt_memories,
-            records=planned_records,
-            plan=retrieval_plan,
-            event_states=event_states,
-        )
-        if planned_records or all_normalized_records
-        else runtime.query(
-            request.query,
-            timestamp=timestamp,
-            limit=request.options.max_prompt_memories,
-        )
-    )
-    plan_payload = retrieval_plan.to_dict()
-    if not all_normalized_records:
-        plan_payload["retrieval_modes"] = ["keyword", "temporal", "recent"]
-    plan_payload["max_prompt_memories"] = request.options.max_prompt_memories
-    plan_payload["include_debug"] = request.options.include_debug
+    _, result, plan = prepare_v2_query(user_id, request)
     return {
-        "retrieval_plan": plan_payload,
-        "candidates": result["relevant_memories"],
-        "gate": result["memory_gate"],
-        "compiled_context": result["compiled_context"],
+        "retrieval_plan": plan, "candidates": result["relevant_memories"],
+        "gate": result["memory_gate"], "compiled_context": result["compiled_context"],
         "response_policy": result["response_policy"],
     }
 
 
 @app.post("/v2/users/{user_id}/prompt-context")
 def v2_prompt_context(user_id: str, request: V2MemoryQueryRequest) -> dict[str, Any]:
-    timestamp = normalize_timestamp(request.timestamp)
-    retrieval_plan = RetrievalPlanner().plan(
-        request.query,
-        max_prompt_memories=request.options.max_prompt_memories,
-    )
-    repository = build_normalized_repository()
-    if not repository.get_user_settings(user_id).memory_enabled:
-        result = SessionMemoryRuntime().prompt_context(
-            request.query, timestamp=timestamp, limit=request.options.max_prompt_memories,
-        )
-        return {
-            "system_guidance": result["system_prompt"],
-            "memory_context": result["compiled_context"],
-            "response_policy": result["response_policy"],
-            "assembled_prompt": result["assembled_prompt"],
-        }
-    runtime = manager.get(v2_session_key(user_id, request.session_id))
-    all_normalized_records = repository.list_records(
-        user_id=user_id,
-        session_id=request.session_id,
-        status=None,
-        limit=200,
-    )
-    normalized_records = repository.list_records(
-        user_id=user_id,
-        session_id=request.session_id,
-        limit=200,
-    )
-    event_states = repository.list_event_states(user_id=user_id, limit=200)
-    planned_records = (
-        [
-            record
-            for record in normalized_records
-            if record.layer in retrieval_plan.include_layers
-        ]
-        if retrieval_plan.include_layers
-        else normalized_records
-    )
-    result = (
-        prompt_context_from_v2_records(
-            runtime,
-            query_text=request.query,
-            timestamp=timestamp,
-            limit=request.options.max_prompt_memories,
-            records=planned_records,
-            event_states=event_states,
-        )
-        if planned_records or all_normalized_records
-        else runtime.prompt_context(
-            request.query,
-            timestamp=timestamp,
-            limit=request.options.max_prompt_memories,
-        )
+    runtime, result, _ = prepare_v2_query(user_id, request)
+    memories = [MemoryItem.from_dict(item) for item in result["relevant_memories"]]
+    prompt = runtime.prompt_builder.build(
+        request.query, memories, runtime.policy_engine.build_from_memories(memories),
+        memory_gate=result["memory_gate"], compiled_context=result["compiled_context"],
     )
     return {
-        "system_guidance": result["system_prompt"],
-        "memory_context": result["compiled_context"],
-        "response_policy": result["response_policy"],
-        "assembled_prompt": result["assembled_prompt"],
+        "system_guidance": prompt["system_prompt"], "memory_context": prompt["compiled_context"],
+        "response_policy": prompt["response_policy"], "assembled_prompt": prompt["assembled_prompt"],
     }
 
 
@@ -800,7 +755,13 @@ def v2_correct_memory(
     memory_id: str,
     request: V2CorrectMemoryRequest,
 ) -> dict[str, Any]:
-    corrected = build_normalized_repository().correct_record(
+    repository = build_normalized_repository()
+    record = repository.get_record(memory_id)
+    if record is None or record.user_id != user_id or record.status != MemoryStatus.ACTIVE:
+        raise HTTPException(status_code=404, detail="Active memory not found.")
+    if not settings_allow_record(record, repository.get_user_settings(user_id)):
+        raise HTTPException(status_code=409, detail="Memory writes are disabled by current settings.")
+    corrected = repository.correct_record(
         memory_id,
         user_id=user_id,
         value=request.value,
@@ -857,6 +818,34 @@ def v2_memory_events(
     }
 
 
+@app.put("/v2/users/{user_id}/memory/events/{memory_id}/followup")
+def v2_set_event_followup(user_id: str, memory_id: str, request: V2EventFollowupRequest) -> dict[str, Any]:
+    repository = build_normalized_repository()
+    record = repository.get_record(memory_id)
+    if record is None or record.user_id != user_id or record.status != MemoryStatus.ACTIVE or record.layer != MemoryLayer.EPISODIC_EVENT:
+        raise HTTPException(status_code=404, detail="Active event memory not found.")
+    settings = repository.get_user_settings(user_id)
+    if request.enabled and (not settings_allow_record(record, settings) or not settings.allow_event_followup):
+        raise HTTPException(status_code=409, detail="Event follow-up is disabled by current settings.")
+    states = [event for event in repository.list_event_states(user_id=user_id, limit=10000) if str(event.memory_id) == memory_id]
+    if not states:
+        raise HTTPException(status_code=404, detail="Event state not found.")
+    timestamp = normalize_timestamp(request.timestamp)
+    record.metadata["followup_opt_in"] = request.enabled
+    repository.upsert_record(record)
+    for event in states:
+        event.followup_policy.enabled = request.enabled
+        event.followup_policy.user_rejected_followup = not request.enabled
+        event.updated_at = timestamp
+        repository.upsert_event_state(event, user_id=user_id)
+    repository.record_operation_audit(
+        MemoryOperation(operation=MemoryOperationType.SETTINGS_UPDATE, candidate=record,
+                        reason="user enabled event follow-up" if request.enabled else "user disabled event follow-up",
+                        score=1.0), memory_id=memory_id, created_at=timestamp,
+    )
+    return {"memory_id": memory_id, "enabled": request.enabled}
+
+
 @app.get("/v2/users/{user_id}/memory/profile-evidence")
 def v2_profile_evidence(
     user_id: str,
@@ -900,12 +889,13 @@ def v2_resolve_memory_review(
     review_item = repository.get_review_item(review_id, user_id=user_id)
     if review_item is None or review_item["status"] != "pending":
         raise HTTPException(status_code=404, detail="Review item not found.")
-    persisted_records = repository.resolve_review_item(
-        review_id,
-        approve=request.approve,
-        user_id=user_id,
-        resolved_at=normalize_timestamp(request.timestamp),
-    )
+    try:
+        persisted_records = repository.resolve_review_item(
+            review_id, approve=request.approve, user_id=user_id,
+            resolved_at=normalize_timestamp(request.timestamp),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
         "review_id": review_id,
         "status": "approved" if request.approve else "rejected",

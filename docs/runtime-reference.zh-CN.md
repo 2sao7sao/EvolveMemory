@@ -4,6 +4,59 @@
 
 以下公式与接口描述确定性原型。模块存在不等于完整宿主对话链路已经接通，也不代表真实模型收益已经测量。
 
+## 2026-11-16 控制与 scope 实现切片
+
+以下描述本轮**已通过本地验证的控制与 scope 实现切片**。完整 S1 宿主、真实模型调用、交付回执及并发撤销保证仍未完成。这里的范围限制用于本地原型，不等于生产认证或多租户隔离已经验证。
+
+2026-11-16 本地结果：pytest **115 passed、72 subtests passed**；unittest **115 passed**；确定性 eval **11/11**、无失败；adaptive replay **PASS**。独立本地复核未发现本切片范围内的阻断项。结果对应本切片代码及以下测试；远端验证以关联实现 PR 的 Checks 为准，本地结果不替代远端检查。
+
+### 一条 v2 存储与读取路径
+
+v2 使用 normalized repository 作为唯一读写来源。`turns/ingest` 不再向 legacy session store 双写；`memory/query` 与 `prompt-context` 不隐式回退到 `/sessions` 的旧数据。已有 `/sessions` 数据保留，不删除、不自动搬迁；需要时由应用明确调用现有 `NormalizedSQLiteMemoryRepository.migrate_store(store=..., user_id=..., session_id=..., now=...)` 迁移。旧 session API 和下方独立 Python runtime 示例不具有 v2 用户设置治理，不能混用两者的控制承诺。
+
+两条 v2 读入口共用 `prepare_v2_query`；先选择允许的 scope，再由 `apply_read_controls` 在排序、候选/debug 返回及上下文编译前过滤 key、layer、sensitive 与 profile。被禁记录不会因相关性更高而恢复。写侧也使用当前设置，临时指令、`auto_write=false` 或 master-off 不应派生新的 profile evidence。
+
+### 字段、范围与项目开启
+
+| 入口 / 字段 | 实现语义 |
+| --- | --- |
+| Ingest `session_id`, `project_id`, `domain` | 由可信宿主提供当前范围；不由 query 自行猜测授权。 |
+| Ingest `memory_scope` | 可为 `turn/session/project/domain/global`；未指定时为 `session`。自然语言仅可收窄为临时 turn/session，不能扩大项目或全局分享。 |
+| Query / prompt-context `session_id`, `project_id`, `domain` | session 记录按 session 与 project 精确匹配；`None` 表示未绑定值，不表示全用户搜索。 |
+| Settings `enabled_project_ids` | 默认 `[]`；project scope 读写须先开启相应项目。 |
+| Settings `allow_global_memory` | 默认 `false`；global scope 读写须单独开启。 |
+| Domain scope | 需显式 domain；携带 project 时，该项目也须已开启。 |
+
+项目开启后，另一个 session 可以读取同项目的 project-scope **记录**；这不等于已经实现跨线程原始会话索引或历史全文检索。不要省略 session/project 来表达“查全部”。
+
+例如，宿主先通过 `PUT /v2/users/{user_id}/memory/settings` 保存：
+
+```json
+{"enabled_project_ids": ["project-A"], "allow_global_memory": false}
+```
+
+再为 project-A 摄取一条项目记录：
+
+```json
+{
+  "session_id": "thread-A1",
+  "project_id": "project-A",
+  "memory_scope": "project",
+  "text": "记住，回答直接一点，先给结论。"
+}
+```
+
+同项目后续 query 可使用 `{"session_id":"thread-A2","project_id":"project-A","query":"在本项目中怎么回答代码 review 问题？"}`。`project-B` 或未绑定 project 不继承 A 的权限；相关度与文字中的“全局”不能打开分享范围。
+
+### 画像确认、事件追问与复核
+
+- 个人 inferred profile 除了通过当前设置和 scope，还必须有实际 review resolution 产生的 `metadata.user_review_approved=true`（附 `review_id` 与确认时间）。高置信、旧 `allowed_use` 或全局画像开关不代替这条确认标记；支持该画像的记录被禁用后也不能继续借画像带入内容。
+- 事件追问默认逐事件关闭。通过 `PUT /v2/users/{user_id}/memory/events/{memory_id}/followup` 与 `{"enabled":true}` 为一个事件开启；`{"enabled":false}` 关闭。它受全局 `allow_event_followup` 和当前记录控制约束；全局开关打开不会批量开启事件。
+- Review resolve 在批准时重新读取当前设置。候选排队后若 key/layer/sensitivity/project/global 权限被撤回，返回 **409** 并保持 **pending**，不先标 approved 再失败。
+- 纠错只接受 ACTIVE 目标；删除和 forget-all 会撤销相关 pending reviews。审批再次检查 target/source 的状态、scope、设置与时间，不能用排队的旧提案恢复已删除或过期的来源。
+- Profile evidence 使用真实 record ID，并与 source_turn_id 共同去重；同一合并 record 的不同源 turn 可以保留，重复源不会被当成新的证据。旧数据库及旧 evidence 唯一约束的无损迁移已有固定测试。
+- 事件事实能否作为背景读取与是否允许主动追问分开判断。本轮没有实现“用户已收到追问”的交付回执、并发配额或生成途中的撤销保证。
+
 ## Mathematical Runtime
 
 EvolveMemory 把 memory 行为设计成可打分、可解释、可评估的决策链。当前规则是确定性的，
@@ -34,7 +87,7 @@ EvolveMemory 把 memory 行为设计成可打分、可解释、可评估的决�
 
 ### 一、Retrieval Score
 
-Retrieval 只负责候选排序，仍然不等于 permission。
+Retrieval 只负责候选排序，仍然不等于 permission。v2 的设置和 scope 硬过滤先于以下评分，评分只作用于仍被允许的候选。
 
 ```math
 \begin{aligned}
@@ -226,7 +279,7 @@ Gate 的核心不是再排序一次，而是把“可用性”和“可见性”
 | --- | --- |
 | `use_directly` | 只有 safe_to_mention 时才进入 direct user facts。 |
 | `style_only` | 转成 style policy，不暴露原始私人证据。 |
-| `follow_up` | 最多一个短 progress cue。 |
+| `follow_up` | 对已逐个开启且全局允许的事件，最多一个短 progress cue；仍受状态与冷却约束。 |
 | `hidden_constraint` | 内部 policy constraint，不对用户可见。 |
 | `clarify` | 使用不确定 memory 前先确认当前事实。 |
 | `summarize_only` | 只作为聚合上下文，不暴露细节。 |
@@ -248,7 +301,7 @@ uvicorn app:app --reload
 AME_STORAGE_BACKEND=sqlite uvicorn app:app --reload
 ```
 
-最小 runtime 接入：
+独立 session runtime 示例（不是 v2 用户设置治理入口，也不会自动应用 v2 项目授权）：
 
 ```python
 from datetime import datetime
@@ -272,6 +325,9 @@ print(context["assembled_prompt"])
 | `POST /v2/users/{user_id}/memory/query` | 为当前 query 检索、打分并 gate memories。 |
 | `POST /v2/users/{user_id}/prompt-context` | 编译 model-ready memory context。 |
 | `GET /v2/users/{user_id}/memory/review-queue` | 查看需要确认的 memories。 |
+| `POST /v2/users/{user_id}/memory/review-queue/{review_id}/resolve` | 按当前设置批准/拒绝；撤权时返回 409 并保留 pending。 |
+| `PUT /v2/users/{user_id}/memory/settings` | 设置主开关、项目/global 开启及 key/layer/feature 控制。 |
+| `PUT /v2/users/{user_id}/memory/events/{memory_id}/followup` | 用 `{"enabled": true/false}` 单独开启或关闭事件追问。 |
 | `POST /v2/users/{user_id}/memory/{memory_id}/correct` | 纠正并退休冲突 records。 |
 | `POST /v2/users/{user_id}/memory/forget-all` | 带 audit trail 清空 memory。 |
 | `GET /v2/users/{user_id}/memory/audit/export` | 导出 records、settings、events 和 audit data。 |

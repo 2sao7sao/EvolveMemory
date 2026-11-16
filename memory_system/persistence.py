@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
 
+from .controls import settings_allow_record
 from .engine import MemoryStore
 from .models import (
     Authority,
@@ -147,12 +148,22 @@ class NormalizedSQLiteMemoryRepository:
         self._ensure_schema()
 
     def upsert_record(self, record: MemoryRecord) -> MemoryRecord:
+        if record.scope == "project" and not record.project_id:
+            raise ValueError("project scope requires project_id")
+        if record.scope == "domain" and not record.domain:
+            raise ValueError("domain scope requires domain")
         payload = record.model_dump(mode="json")
         with self._connect() as conn:
+            existing_row = conn.execute(
+                "SELECT * FROM memory_records WHERE id = ?", (str(record.id),)
+            ).fetchone()
+            if existing_row is not None and not record.same_scope_as(self._row_to_record(existing_row)):
+                raise ValueError("cannot change a memory record's owner or scope boundary")
             conn.execute(
                 """
                 INSERT INTO memory_records (
-                    id, tenant_id, user_id, session_id, layer, key, value_json,
+                    id, tenant_id, user_id, session_id, project_id, domain, scope,
+                    layer, key, value_json,
                     normalized_value_json, confidence, authority, sensitivity,
                     allowed_use_json, evidence_ids_json, source_turn_ids_json,
                     source_text_hash, valid_from, valid_to, observed_at,
@@ -161,7 +172,8 @@ class NormalizedSQLiteMemoryRepository:
                     metadata_json, created_at, updated_at
                 )
                 VALUES (
-                    :id, :tenant_id, :user_id, :session_id, :layer, :key, :value_json,
+                    :id, :tenant_id, :user_id, :session_id, :project_id, :domain, :scope,
+                    :layer, :key, :value_json,
                     :normalized_value_json, :confidence, :authority, :sensitivity,
                     :allowed_use_json, :evidence_ids_json, :source_turn_ids_json,
                     :source_text_hash, :valid_from, :valid_to, :observed_at,
@@ -171,6 +183,9 @@ class NormalizedSQLiteMemoryRepository:
                 )
                 ON CONFLICT(id) DO UPDATE SET
                     session_id = excluded.session_id,
+                    project_id = excluded.project_id,
+                    domain = excluded.domain,
+                    scope = excluded.scope,
                     layer = excluded.layer,
                     key = excluded.key,
                     value_json = excluded.value_json,
@@ -247,6 +262,53 @@ class NormalizedSQLiteMemoryRepository:
             return UserMemorySettings()
         return UserMemorySettings.from_dict(json.loads(row["payload_json"]))
 
+    def list_records_scoped(
+        self,
+        *,
+        user_id: str,
+        scope: str,
+        tenant_id: str = "default",
+        session_id: str | None = None,
+        project_id: str | None = None,
+        domain: str | None = None,
+        status: MemoryStatus | None = MemoryStatus.ACTIVE,
+        key: str | None = None,
+        limit: int = 100,
+    ) -> list[MemoryRecord]:
+        """Read exactly one authorized boundary; None means SQL NULL, never all sessions.
+
+        The management list_records API deliberately keeps its existing unfiltered defaults.
+        Callers combine separate scope reads only after deciding which boundaries are allowed.
+        """
+        if scope not in {"session", "project", "domain", "global"}:
+            raise ValueError("persistent reads require session, project, domain, or global scope")
+        if scope == "project" and not project_id:
+            raise ValueError("project scope requires project_id")
+        if scope == "domain" and not domain:
+            raise ValueError("domain scope requires domain")
+        query = "SELECT * FROM memory_records WHERE tenant_id = ? AND user_id = ? AND scope = ?"
+        params: list[object] = [tenant_id, user_id, scope]
+        if scope == "session":
+            query += " AND session_id IS ? AND project_id IS ?"
+            params.extend([session_id, project_id])
+        elif scope == "project":
+            query += " AND project_id IS ?"
+            params.append(project_id)
+        elif scope == "domain":
+            query += " AND domain IS ? AND project_id IS ?"
+            params.extend([domain, project_id])
+        if status is not None:
+            query += " AND status = ?"
+            params.append(status.value)
+        if key is not None:
+            query += " AND key = ?"
+            params.append(key)
+        query += " ORDER BY valid_from DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
     def upsert_user_settings(
         self,
         user_id: str,
@@ -275,6 +337,10 @@ class NormalizedSQLiteMemoryRepository:
         created_at: datetime | None = None,
     ) -> list[MemoryRecord]:
         timestamp = created_at or datetime.now(timezone.utc)
+        if operation.target_memory_id is not None:
+            target = self.get_record(str(operation.target_memory_id))
+            if target is not None and not operation.candidate.same_scope_as(target):
+                raise ValueError("memory operation cannot cross owner or scope boundaries")
         if operation.operation == MemoryOperationType.CREATE:
             record = self.upsert_record(operation.candidate)
             self.add_evidence_for_record(record, created_at=timestamp)
@@ -532,6 +598,35 @@ class NormalizedSQLiteMemoryRepository:
         row = self.get_review_item(review_id, user_id=user_id)
         if row is None or row["status"] != "pending":
             return []
+        candidate = MemoryRecord.model_validate(json.loads(str(row["candidate_json"])))
+        if approve:
+            if candidate.scope == "project" and not candidate.project_id:
+                raise ValueError("project scope requires project_id")
+            if candidate.scope == "domain" and not candidate.domain:
+                raise ValueError("domain scope requires domain")
+            settings = self.get_user_settings(candidate.user_id)
+            if not settings_allow_record(candidate, settings):
+                raise ValueError("review approval blocked by current memory settings")
+            if row["target_memory_id"]:
+                target = self.get_record(str(row["target_memory_id"]))
+                if target is None or target.status != MemoryStatus.ACTIVE:
+                    raise ValueError("review target is no longer active")
+                if not candidate.same_scope_as(target):
+                    raise ValueError("review approval cannot cross owner or scope boundaries")
+            source_ids = candidate.metadata.get("source_memory_ids", [])
+            if not isinstance(source_ids, list) or any(not isinstance(item, str) for item in source_ids):
+                raise ValueError("review source_memory_ids must be a list of memory ids")
+            for source_id in source_ids:
+                source = self.get_record(source_id)
+                if (
+                    source is None
+                    or source.status != MemoryStatus.ACTIVE
+                    or not candidate.same_scope_as(source)
+                    or not settings_allow_record(source, settings)
+                    or source.valid_from > timestamp
+                    or (source.valid_to is not None and source.valid_to <= timestamp)
+                ):
+                    raise ValueError("review source is unavailable in the current scope or settings")
         status = "approved" if approve else "rejected"
         with self._connect() as conn:
             conn.execute(
@@ -544,7 +639,11 @@ class NormalizedSQLiteMemoryRepository:
             )
         if not approve:
             return []
-        candidate = MemoryRecord.model_validate(json.loads(str(row["candidate_json"])))
+        candidate.metadata.update({
+            "user_review_approved": True,
+            "review_id": review_id,
+            "review_approved_at": timestamp.isoformat(),
+        })
         operation_type = (
             MemoryOperationType.SUPERSEDE
             if row["target_memory_id"]
@@ -568,29 +667,39 @@ class NormalizedSQLiteMemoryRepository:
                 """
                 INSERT OR IGNORE INTO profile_evidence (
                     id, user_id, session_id, dimension, value, confidence, weight,
-                    polarity, source_memory_id, source_key, quote, observed_at,
+                    polarity, source_memory_id, source_turn_id, source_key, quote, observed_at,
                     metadata_json
                 )
                 VALUES (
                     :id, :user_id, :session_id, :dimension, :value, :confidence, :weight,
-                    :polarity, :source_memory_id, :source_key, :quote, :observed_at,
+                    :polarity, :source_memory_id, :source_turn_id, :source_key, :quote, :observed_at,
                     :metadata_json
                 )
                 """,
                 {
                     **payload,
+                    "source_turn_id": evidence.source_turn_id or "",
                     "metadata_json": json.dumps(payload["metadata"], ensure_ascii=False),
                 },
             )
-        return evidence
+            row = conn.execute(
+                """
+                SELECT * FROM profile_evidence
+                WHERE user_id = ? AND dimension = ? AND value = ?
+                    AND source_memory_id = ? AND source_turn_id = ?
+                """,
+                (evidence.user_id, evidence.dimension, evidence.value,
+                 str(evidence.source_memory_id), evidence.source_turn_id or ""),
+            ).fetchone()
+        if row is None:
+            raise ValueError("profile evidence id conflicts with another evidence identity")
+        return self._profile_evidence_from_row(row)
 
     def add_profile_evidence_batch(
         self,
         evidence: list[ProfileEvidence],
     ) -> list[ProfileEvidence]:
-        for item in evidence:
-            self.add_profile_evidence(item)
-        return evidence
+        return [self.add_profile_evidence(item) for item in evidence]
 
     def list_profile_evidence(
         self,
@@ -608,26 +717,13 @@ class NormalizedSQLiteMemoryRepository:
         params.append(limit)
         with self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
-        return [
-            ProfileEvidence.from_dict(
-                {
-                    "id": row["id"],
-                    "user_id": row["user_id"],
-                    "session_id": row["session_id"],
-                    "dimension": row["dimension"],
-                    "value": row["value"],
-                    "confidence": row["confidence"],
-                    "weight": row["weight"],
-                    "polarity": row["polarity"],
-                    "source_memory_id": row["source_memory_id"],
-                    "source_key": row["source_key"],
-                    "quote": row["quote"],
-                    "observed_at": row["observed_at"],
-                    "metadata": json.loads(row["metadata_json"]),
-                }
-            )
-            for row in rows
-        ]
+        return [self._profile_evidence_from_row(row) for row in rows]
+
+    def _profile_evidence_from_row(self, row: sqlite3.Row) -> ProfileEvidence:
+        return ProfileEvidence.from_dict({
+            **dict(row),
+            "metadata": json.loads(row["metadata_json"]),
+        })
 
     def mark_deleted(self, memory_id: str, *, updated_at: datetime | None = None) -> bool:
         timestamp = (updated_at or datetime.now(timezone.utc)).isoformat()
@@ -663,6 +759,10 @@ class NormalizedSQLiteMemoryRepository:
                 """,
                 (MemoryStatus.DELETED.value, timestamp.isoformat(), memory_id, user_id),
             )
+            cancelled_reviews = self._cancel_pending_reviews(
+                conn, user_id=user_id, timestamp=timestamp, memory_ids={memory_id},
+                reason="source memory deleted",
+            )
         if cursor.rowcount <= 0:
             return False
         self.record_lifecycle_audit(
@@ -670,7 +770,7 @@ class NormalizedSQLiteMemoryRepository:
             action="deleted",
             memory_id=memory_id,
             before=existing.model_dump(mode="json"),
-            after=None,
+            after={"cancelled_review_ids": cancelled_reviews},
             reason=reason,
             created_at=timestamp,
         )
@@ -688,7 +788,7 @@ class NormalizedSQLiteMemoryRepository:
     ) -> MemoryRecord | None:
         timestamp = corrected_at or datetime.now(timezone.utc)
         existing = self.get_record(memory_id)
-        if existing is None or existing.user_id != user_id:
+        if existing is None or existing.user_id != user_id or existing.status != MemoryStatus.ACTIVE:
             return None
         corrected = existing.model_copy(deep=True)
         corrected.id = uuid4()
@@ -742,8 +842,6 @@ class NormalizedSQLiteMemoryRepository:
             status=MemoryStatus.ACTIVE,
             limit=10000,
         )
-        if not records:
-            return 0
         query = (
             "UPDATE memory_records SET status = ?, updated_at = ? "
             "WHERE user_id = ? AND status = ?"
@@ -759,16 +857,58 @@ class NormalizedSQLiteMemoryRepository:
             params.append(session_id)
         with self._connect() as conn:
             cursor = conn.execute(query, params)
+            cancelled_reviews = self._cancel_pending_reviews(
+                conn, user_id=user_id, timestamp=timestamp,
+                memory_ids={str(record.id) for record in records},
+                cancel_session=True, session_id=session_id, reason="user requested forget-all",
+            )
         self.record_lifecycle_audit(
             user_id=user_id,
             action="forget_all",
             memory_id=None,
             before={"memory_ids": [str(record.id) for record in records]},
-            after=None,
+            after={"cancelled_review_ids": cancelled_reviews},
             reason=reason,
             created_at=timestamp,
         )
         return cursor.rowcount
+
+    def _cancel_pending_reviews(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        user_id: str,
+        timestamp: datetime,
+        memory_ids: set[str],
+        reason: str,
+        cancel_session: bool = False,
+        session_id: str | None = None,
+    ) -> list[str]:
+        cancelled: list[str] = []
+        rows = conn.execute(
+            "SELECT * FROM memory_review_queue WHERE user_id = ? AND status = 'pending'",
+            (user_id,),
+        ).fetchall()
+        for row in rows:
+            candidate = json.loads(row["candidate_json"])
+            source_ids = candidate.get("metadata", {}).get("source_memory_ids", [])
+            linked = row["target_memory_id"] in memory_ids or (
+                isinstance(source_ids, list) and any(str(item) in memory_ids for item in source_ids)
+            )
+            in_session = cancel_session and (
+                session_id is None or candidate.get("session_id") == session_id
+            )
+            if not linked and not in_session:
+                continue
+            cursor = conn.execute(
+                """UPDATE memory_review_queue
+                   SET status = 'cancelled', resolved_at = ?, reason = reason || ?
+                   WHERE id = ? AND status = 'pending'""",
+                (timestamp.isoformat(), f"; cancelled: {reason}", row["id"]),
+            )
+            if cursor.rowcount:
+                cancelled.append(row["id"])
+        return cancelled
 
     def record_lifecycle_audit(
         self,
@@ -891,6 +1031,9 @@ class NormalizedSQLiteMemoryRepository:
             "tenant_id": payload["tenant_id"],
             "user_id": payload["user_id"],
             "session_id": payload.get("session_id"),
+            "project_id": payload.get("project_id"),
+            "domain": payload.get("domain"),
+            "scope": payload.get("scope", "session"),
             "layer": payload["layer"],
             "key": payload["key"],
             "value_json": json.dumps(payload["value"], ensure_ascii=False),
@@ -926,6 +1069,9 @@ class NormalizedSQLiteMemoryRepository:
                 "tenant_id": row["tenant_id"],
                 "user_id": row["user_id"],
                 "session_id": row["session_id"],
+                "project_id": row["project_id"],
+                "domain": row["domain"],
+                "scope": row["scope"],
                 "layer": row["layer"],
                 "key": row["key"],
                 "value": json.loads(row["value_json"]),
@@ -994,6 +1140,9 @@ class NormalizedSQLiteMemoryRepository:
                     tenant_id TEXT NOT NULL,
                     user_id TEXT NOT NULL,
                     session_id TEXT,
+                    project_id TEXT,
+                    domain TEXT,
+                    scope TEXT NOT NULL DEFAULT 'session',
                     layer TEXT NOT NULL,
                     key TEXT NOT NULL,
                     value_json TEXT NOT NULL,
@@ -1022,6 +1171,18 @@ class NormalizedSQLiteMemoryRepository:
                     updated_at TEXT NOT NULL
                 )
                 """
+            )
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(memory_records)")}
+            for name, definition in (
+                ("project_id", "TEXT"),
+                ("domain", "TEXT"),
+                ("scope", "TEXT NOT NULL DEFAULT 'session'"),
+            ):
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE memory_records ADD COLUMN {name} {definition}")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory_records"
+                "(tenant_id, user_id, scope, project_id, session_id, domain, status)"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_memory_user_status ON memory_records(user_id, status)"
@@ -1136,17 +1297,74 @@ class NormalizedSQLiteMemoryRepository:
                     weight REAL NOT NULL,
                     polarity TEXT NOT NULL,
                     source_memory_id TEXT NOT NULL,
+                    source_turn_id TEXT NOT NULL DEFAULT '',
                     source_key TEXT NOT NULL,
                     quote TEXT NOT NULL,
                     observed_at TEXT NOT NULL,
                     metadata_json TEXT NOT NULL,
-                    UNIQUE(user_id, dimension, value, source_memory_id)
+                    UNIQUE(user_id, dimension, value, source_memory_id, source_turn_id)
                 )
                 """
             )
+            self._migrate_profile_evidence_turns(conn)
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_profile_evidence_user_dimension
                 ON profile_evidence(user_id, dimension, observed_at)
                 """
             )
+
+    def _migrate_profile_evidence_turns(self, conn: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(profile_evidence)")}
+        if "source_turn_id" in columns:
+            return
+        # SQLite's original inline UNIQUE constraint cannot be dropped separately.
+        # Rebuild atomically, retaining legacy IDs and content without inventing turns.
+        conn.execute("SAVEPOINT profile_evidence_turn_migration")
+        try:
+            conn.execute(
+                """
+                CREATE TABLE profile_evidence_by_turn (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    session_id TEXT,
+                    dimension TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    weight REAL NOT NULL,
+                    polarity TEXT NOT NULL,
+                    source_memory_id TEXT NOT NULL,
+                    source_turn_id TEXT NOT NULL DEFAULT '',
+                    source_key TEXT NOT NULL,
+                    quote TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    UNIQUE(user_id, dimension, value, source_memory_id, source_turn_id)
+                )
+                """
+            )
+            for row in conn.execute("SELECT * FROM profile_evidence").fetchall():
+                metadata = json.loads(row["metadata_json"])
+                turn_id = metadata.get("source_turn_id")
+                payload = {**dict(row), "source_turn_id": turn_id if isinstance(turn_id, str) else ""}
+                conn.execute(
+                    """
+                    INSERT INTO profile_evidence_by_turn (
+                        id, user_id, session_id, dimension, value, confidence, weight,
+                        polarity, source_memory_id, source_turn_id, source_key, quote,
+                        observed_at, metadata_json
+                    ) VALUES (
+                        :id, :user_id, :session_id, :dimension, :value, :confidence, :weight,
+                        :polarity, :source_memory_id, :source_turn_id, :source_key, :quote,
+                        :observed_at, :metadata_json
+                    )
+                    """,
+                    payload,
+                )
+            conn.execute("DROP TABLE profile_evidence")
+            conn.execute("ALTER TABLE profile_evidence_by_turn RENAME TO profile_evidence")
+            conn.execute("RELEASE SAVEPOINT profile_evidence_turn_migration")
+        except Exception:
+            conn.execute("ROLLBACK TO SAVEPOINT profile_evidence_turn_migration")
+            conn.execute("RELEASE SAVEPOINT profile_evidence_turn_migration")
+            raise

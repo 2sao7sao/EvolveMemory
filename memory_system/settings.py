@@ -19,6 +19,8 @@ class GatePolicyConfig:
 @dataclass(frozen=True)
 class UserMemorySettings:
     memory_enabled: bool = True
+    enabled_project_ids: list[str] = field(default_factory=list)
+    allow_global_memory: bool = False
     allow_inferred_profile: bool = True
     allow_sensitive_memory: bool = False
     allow_event_followup: bool = True
@@ -43,6 +45,8 @@ class UserMemorySettings:
     def to_dict(self) -> dict[str, Any]:
         return {
             "memory_enabled": self.memory_enabled,
+            "enabled_project_ids": list(self.enabled_project_ids),
+            "allow_global_memory": self.allow_global_memory,
             "allow_inferred_profile": self.allow_inferred_profile,
             "allow_sensitive_memory": self.allow_sensitive_memory,
             "allow_event_followup": self.allow_event_followup,
@@ -62,6 +66,8 @@ class UserMemorySettings:
         defaults = cls()
         return cls(
             memory_enabled=bool(payload.get("memory_enabled", defaults.memory_enabled)),
+            enabled_project_ids=list(payload.get("enabled_project_ids", [])),
+            allow_global_memory=bool(payload.get("allow_global_memory", False)),
             allow_inferred_profile=bool(
                 payload.get("allow_inferred_profile", defaults.allow_inferred_profile)
             ),
