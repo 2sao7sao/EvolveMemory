@@ -77,13 +77,15 @@ The replay writes two synthetic user turns, queries them in different contexts, 
 | Ask for a Python review and explicitly exclude the interview | Suppress the interview while retaining allowed style guidance. |
 | Ask to stop remembering anxiety | Retire the sensitive state and its derived profile signal. |
 
+This existing replay uses the standalone session runtime. Its follow-up examples do not enable v2 event follow-ups, which default to off per event; see the [v2 contract](docs/runtime-reference.md).
+
 ```bash
 python examples/replay_adaptive_memory.py
 python -m unittest discover -s tests -p 'test_*.py'
 python -m evals.runner --suite all
 ```
 
-The 2026-11-16 maintenance check passed 72 local tests and all 11 deterministic eval suites after two targeted fixes. It covers the seeded cases and HTTP handlers through FastAPI's test client. It does not establish live model helpfulness, retrieval at scale, production latency, or deployed service readiness. Full evidence and the previous failure are in [maintenance notes](docs/maintenance.md).
+The 2026-11-16 [controls/scope implementation slice (PR #15)](https://github.com/2sao7sao/EvolveMemory/pull/15) passed 115 local tests (72 pytest subtests), all 11 deterministic eval suites, and the standalone adaptive replay. PR #15 is merged and its [hosted CI passed](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401). These results cover seeded cases and HTTP handlers through FastAPI’s test client. They do not establish a complete host loop, live model helpfulness, retrieval at scale, production latency, or deployed service readiness. The earlier PR #13 baseline checks are recorded separately in [maintenance notes](docs/maintenance.md); see [protocol §13](docs/conversation-memory-invocation-spec.md#13-历史缺口主线修复与本轮状态) for this slice.
 
 ## Status and roadmap
 
@@ -91,19 +93,19 @@ The 2026-11-16 maintenance check passed 72 local tests and all 11 deterministic 
 
 | Priority | Next step | Completion evidence |
 | --- | --- | --- |
-| P0 | Keep memory opt-out effective on both v2 read routes; preserve deterministic migration tests | Regressions for normalized storage, legacy fallback, re-enable behavior, and expiry boundaries. Included in this maintenance update. |
-| P1 | Review [draft PR #12](https://github.com/2sao7sao/EvolveMemory/pull/12) and agree on the host contract | Explicit decisions for scope and conversation defaults, then an independently tested first slice. |
+| P0 | Preserve normalized-only storage, settings, and scope regressions | PR #15 is merged with passing local checks and hosted CI. |
+| P1 | Complete temporary turn scope and the minimal host in [draft PR #12’s protocol](docs/conversation-memory-invocation-spec.md) | Current-turn overrides and actual model-call input capture; local ingest protections alone do not complete S0-c / S1. |
 | P1 | Integrate scope, correction, and lifecycle checks into a single-thread loop | Source-backed cases that cover old decisions, opt-out, stale events, and prompt delivery. |
 | P2 | Introduce real extraction / embedding providers and measure them | Versioned datasets, provider configuration, costs, latency, and failure cases. |
 | P2 | Restore the product-page publishing path | Successful Pages deployment and an independently checked live URL. |
 
-PR #12 is a discussion draft, not shipped runtime behavior. Its last observed CI run failed on the pre-existing clock-dependent migration test. The local fix here does not rerun or approve that PR. See [maintenance status](docs/maintenance.md) and the [development spec](docs/next-development-spec.md) for the remaining governance UI, storage, and security work.
+PR #12 now records the confirmed project-task continuation choices and the remaining protocol work. Its historical CI failure came from the migration-clock test fixed in PR #13; new branch checks must use the updated revision. PR #15 delivers the validated controls/scope slice; full S0-c / S1, complete cross-thread retrieval, and real-model helpfulness remain unverified. See [maintenance status](docs/maintenance.md) and the [development spec](docs/next-development-spec.md) for scope and evidence boundaries.
 
 ## Documentation and assets
 
 | Resource | Purpose |
 | --- | --- |
-| [Conversation-memory protocol](docs/conversation-memory-invocation-spec.md) | Discussion draft for multi-turn invocation, scoped evidence, and context delivery; not completed runtime behavior. |
+| [Conversation-memory protocol](docs/conversation-memory-invocation-spec.md) | Confirmed product choices, scoped evidence, delivery capture, and fixed acceptance cases; the full protocol is not complete. |
 | [Runtime reference](docs/runtime-reference.md) | Retrieval math, activation, causal relevance, write governance, Python and HTTP surfaces. |
 | [Adaptive replay walkthrough](examples/adaptive_memory_replay.md) | Inputs, outputs, and what each seeded check establishes. |
 | [Maintenance notes](docs/maintenance.md) | Current evidence, prioritized follow-up, and visual asset inventory. |

@@ -77,13 +77,15 @@ python -m uvicorn app:app --reload
 | 只做 Python review，明确不要提面试 | 抑制面试信息，保留允许的风格指导。 |
 | 要求不再记住焦虑 | 退役敏感状态及其派生画像信号。 |
 
+这段既有回放使用独立 session runtime；其中追问示例不代表 v2 事件追问已经开启。v2 默认逐事件关闭，详见[v2 接口](docs/runtime-reference.zh-CN.md)。
+
 ```bash
 python examples/replay_adaptive_memory.py
 python -m unittest discover -s tests -p 'test_*.py'
 python -m evals.runner --suite all
 ```
 
-2026-11-16 维护检查在两项定向修复后通过 72 个本地测试和全部 11 个确定性评估套件。范围包含固定案例及 FastAPI TestClient 对 HTTP 处理函数的验证；尚不能证明真实模型帮助程度、大规模检索、生产时延或线上服务可用性。完整证据与修复前失败见[维护记录](docs/maintenance.md)。
+2026-11-16 [控制与 scope 实现切片（PR #15）](https://github.com/2sao7sao/EvolveMemory/pull/15)通过 115 个本地测试（另有 72 个 pytest subtest）、全部 11 个确定性评估套件及既有 adaptive replay。PR #15 已合并且[远端 CI 通过](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401)。验证范围包含固定案例和 FastAPI TestClient 对 HTTP 处理函数的检查。这不能证明完整宿主循环、真实模型帮助程度、大规模检索、生产时延或线上服务可用性。PR #13 的旧基线结果单独保留在[维护记录](docs/maintenance.md)，本切片见[协议第 13 节](docs/conversation-memory-invocation-spec.md#13-历史缺口主线修复与本轮状态)。
 
 ## 状态与路线
 
@@ -91,19 +93,19 @@ python -m evals.runner --suite all
 
 | 优先级 | 下一步 | 完成证据 |
 | --- | --- | --- |
-| P0 | 两条 v2 读路径遵守记忆禁用；迁移测试不依赖真实日期 | 规范化存储、旧会话回退、重新启用及过期边界回归；本次维护已包含。 |
-| P1 | 评审 [Draft PR #12](https://github.com/2sao7sao/EvolveMemory/pull/12)，确定宿主协议 | 明确作用域和对话默认行为，再独立实现并验收首个切片。 |
+| P0 | 保留 normalized-only 存储、设置与 scope 回归 | PR #15 已合并，本地检查与远端 CI 通过。 |
+| P1 | 完成 [Draft PR #12 协议](docs/conversation-memory-invocation-spec.md)的临时范围与最小宿主 | 验证当前轮覆盖与实际调用参数捕获；ingest 防护不等于 S0-c / S1 完成。 |
 | P1 | 在单线程循环中接通作用域、纠错与生命周期检查 | 覆盖旧决定、禁用、过期事件及上下文交付的可回查案例。 |
 | P2 | 引入真实抽取 / embedding provider 并测量 | 有版本的数据集、配置、费用、时延和失败案例。 |
 | P2 | 恢复产品页发布路径 | Pages 部署成功，并独立确认线上 URL。 |
 
-PR #12 仍是讨论草案，不代表运行时已经交付。最近观察到的该 PR CI 因既有的时钟依赖迁移测试失败；此处的本地修复不等于已重跑或批准该 PR。治理界面、存储与安全等后续工作见[维护状态](docs/maintenance.md)和[下一阶段 Spec](docs/next-development-spec.md)。
+PR #12 已记录确认的项目任务续接选择与剩余协议工作。该分支历史 CI 的迁移时钟失败已在 PR #13 修复；更新后的分支仍须按新版本检查。PR #15 已交付并验证控制与 scope 切片；完整 S0-c / S1、跨线程检索及真实模型帮助程度仍未验证。范围与证据边界见[维护状态](docs/maintenance.md)和[下一阶段 Spec](docs/next-development-spec.md)。
 
 ## 文档与素材
 
 | 入口 | 内容 |
 | --- | --- |
-| [对话记忆协议](docs/conversation-memory-invocation-spec.md) | 多轮调用、作用域证据与上下文交付的讨论草案；不代表完整运行时已经实现。 |
+| [对话记忆协议](docs/conversation-memory-invocation-spec.md) | 已确认产品选择、作用域证据、交付捕获与固定验收案例；完整协议尚未完成。 |
 | [运行时参考](docs/runtime-reference.zh-CN.md) | 检索数学、激活、因果相关性、写入治理、Python 与 HTTP 接口。 |
 | [回放说明](examples/adaptive_memory_replay.md) | 输入、输出与固定检查能够证明的范围。 |
 | [维护记录](docs/maintenance.md) | 当前证据、优先级待办及展示素材清单。 |

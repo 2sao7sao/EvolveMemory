@@ -1,4 +1,6 @@
-# EvolveMemory Next Development Spec v0.1
+# EvolveMemory Next Development Spec v0.2
+
+Updated 2026-11-16. Product choices are confirmed; the controls and scope slice is being implemented. This document does not establish that the full conversation runtime is complete.
 
 ## Core Positioning
 
@@ -10,7 +12,7 @@ EvolveMemory is the memory control plane for AI personalization: it decides what
 
 ## Target Architecture (v3)
 
-For the concrete multi-turn read path, see [Conversation Memory Invocation and Use Protocol](conversation-memory-invocation-spec.md) (Chinese discussion draft, 2026-09-04). It specifies direct recent context, older/cross-thread evidence, query construction, scoped retrieval, profile/event/hypothesis use conditions, budgets, and slice acceptance gates. Its parameters and proposed interfaces are not implemented defaults. The module statuses below describe individual modules; they do not establish end-to-end integration. See section 13 of the new draft for the `c628f00` runtime gaps.
+For the concrete multi-turn read path, see [Conversation Memory Invocation and Use Protocol](conversation-memory-invocation-spec.md) (Chinese protocol draft v0.2, updated 2026-11-16). The user has selected project-task continuation, authorized reuse within the same project, personal-profile adaptation only after confirmation, per-event opt-in follow-ups, and conditional source hints. Numerical budgets and the full proposed interfaces remain unvalidated. Section 13 separates the historical `c628f00` gaps from the master read-opt-out and migration-clock fixes already merged in PR #13 at `main@3aa4285`, the current implementation slice, and remaining work. Module availability below does not establish end-to-end integration.
 
 ```text
 User Turn / App Event / UI Feedback
@@ -47,16 +49,17 @@ Prompt-safe Context + Dynamic Controls + Audit Trace
 
 ## Development Priority
 
-```text
-1. LLM extraction (provider-backed)
-2. Authority & scope resolver             ✓ implemented
-3. Temporary vs global preference guard   ✓ implemented (ephemeral_only)
-4. Staleness lifecycle                    ✓ implemented
-5. Memory interaction controls            ✓ implemented
-6. User governance UX
-7. Hybrid retrieval (embeddings + reranker)
-8. Production hardening (auth, encryption, tenant isolation)
-```
+| Slice | Deliverable | Acceptance boundary |
+| --- | --- | --- |
+| Existing baseline fixes | v2 master read opt-out and deterministic migration clock | Already merged in PR #13; retain those regressions. |
+| S0-a | Normalized-only v2 reads/writes with shared persisted controls; explicit legacy migration | Existing records/new writes respect disabled keys/layers/features; actual review markers and per-event opt-in are verified independently. No implicit legacy fallback or dual-write. |
+| S0-b | Persist and propagate scope/project/domain/authority | Reload tests, permitted same-project reuse, cross-project exclusion, exact unbound-identifier semantics, and explicit migration compatibility. |
+| S0-c | Turn-local restrictions and temporary scope | Current-turn overrides do not silently become long-term/global preferences; a request can narrow existing access, never expand it. |
+| S1-a | Minimal host adapter and captured model-call input | Inspect the actual package delivered to a deterministic callable; compilation alone is not delivery, and a fake callable is not a live provider. |
+| S1-b | Bounded project-task continuation | Preserve recent turns, recover an older decision with sources, and apply current-turn overrides. |
+| S2–S4 | Complete cross-thread retrieval, governed feedback, providers, and quality/performance evaluation | Independent evidence for history coverage, authorization, model behavior, latency, cost, and user experience. |
+
+The [controls/scope implementation slice (PR #15)](https://github.com/2sao7sao/EvolveMemory/pull/15) passed 115 local tests (72 pytest subtests), all 11 deterministic eval suites, and the standalone adaptive replay on 2026-11-16. This covers S0-a/S0-b behavior and temporary-ingest protections; S0-c, concurrent revocation/full dependency invalidation, S1 delivery, and real-provider validation remain incomplete. S1-a is brought forward as the first delivery seam. PR #15 is merged at `8e3ab17` and its [hosted CI passed](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401). Protocol section 13 records the slice and evidence; a module checkmark does not establish the remaining protocol.
 
 ## Key Metrics
 
@@ -75,6 +78,8 @@ Prompt-safe Context + Dynamic Controls + Audit Trace
 
 ## Module Status
 
+These are existing module-level statuses, not completion of the integrated S0/S1 path or the newly confirmed product defaults.
+
 | Module | Status | Location |
 | --- | --- | --- |
 | Authority Resolver | Implemented | `memory_system/governance/authority.py` |
@@ -88,22 +93,8 @@ Prompt-safe Context + Dynamic Controls + Audit Trace
 | User Governance UX | Not started | Future PR |
 | Security Hardening | Not started | Future PR |
 
-## PR Sequence
+## Delivery boundaries
 
-See the full spec for detailed PR descriptions and acceptance criteria:
+The earlier numbered work-package list was a design sequence, not the repository's actual GitHub PR numbering. The current [PR #12](https://github.com/2sao7sao/EvolveMemory/pull/12) is the conversation-protocol draft; [PR #13](https://github.com/2sao7sao/EvolveMemory/pull/13) delivered targeted maintenance fixes, not security hardening.
 
-- PR 0: Positioning & Prototype Boundary ✓
-- PR 1: Gate Decision Rules Doc ✓
-- PR 2: LLM Extractor Provider Interface (next)
-- PR 3: Extraction Eval v2
-- PR 4: Authority & Scope Resolver ✓
-- PR 5: Write Governance v3 ✓
-- PR 6: Cross-Session Storage
-- PR 7: Hybrid Retrieval Provider
-- PR 8: Staleness & Lifecycle Engine ✓
-- PR 9: Event Skills + Procedural Memory
-- PR 10: Memory Interaction Layer ✓
-- PR 11: Governance Client Flow
-- PR 12: Live LLM Demo
-- PR 13: Security Hardening
-- PR 14: Eval Dashboard
+Use the slices above and the fixed F01–F10 / H01–H04 matrix in the [protocol](conversation-memory-invocation-spec.md) for the next changes. Preserve separate results for local contract tests, captured host delivery, hosted CI, real-provider calls, and user acceptance. Complete cross-thread history and real-model helpfulness remain future work.
