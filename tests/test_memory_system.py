@@ -58,6 +58,7 @@ from memory_system import (
     WeightedMemoryWriteEvaluatorV2,
     WritePolicyContext,
 )
+from memory_system.settings import UserMemorySettings
 from memory_system.demo import format_demo_report, run_product_demo
 
 
@@ -278,7 +279,10 @@ class MemorySystemTest(unittest.TestCase):
         old_record = MemoryRecord.from_memory_item(old_item, user_id="user-1")
         new_record = MemoryRecord.from_memory_item(new_item, user_id="user-1")
 
-        operation = WeightedMemoryWriteEvaluatorV2().evaluate(new_record, [old_record])
+        operation = WeightedMemoryWriteEvaluatorV2().evaluate(
+            new_record, [old_record],
+            WritePolicyContext(settings=UserMemorySettings(allow_sensitive_memory=True, review_required_for_sensitivity=[])),
+        )
 
         self.assertEqual(operation.operation.value, "supersede")
         self.assertEqual(operation.target_memory_id, old_record.id)
@@ -298,7 +302,7 @@ class MemorySystemTest(unittest.TestCase):
         )
         record = MemoryRecord.from_memory_item(item, user_id="user-1")
 
-        operation = WeightedMemoryWriteEvaluatorV2().evaluate(record)
+        operation = WeightedMemoryWriteEvaluatorV2().evaluate(record, context=WritePolicyContext(settings=UserMemorySettings(allow_sensitive_memory=True)))
 
         self.assertEqual(operation.operation.value, "ask_user_confirmation")
         self.assertTrue(operation.requires_user_review)
@@ -730,7 +734,9 @@ class MemorySystemTest(unittest.TestCase):
                 coexistence_rule="mutually_exclusive",
                 metadata={"evidence": "我现在单身"},
             )
-            operation = WeightedMemoryWriteEvaluatorV2().evaluate(record)
+            settings = UserMemorySettings(allow_sensitive_memory=True)
+            repo.upsert_user_settings("user-1", settings)
+            operation = WeightedMemoryWriteEvaluatorV2().evaluate(record, context=WritePolicyContext(settings=settings))
 
             repo.apply_operations([operation], created_at=timestamp)
             review_items = repo.list_review_items(user_id="user-1")
@@ -1368,6 +1374,12 @@ class MemoryApiTest(unittest.TestCase):
         self.assertTrue(ingest_payload["persisted_records"])
         self.assertTrue(ingest_payload["persisted_event_states"])
 
+        event_id = ingest_payload["persisted_event_states"][0]["memory_id"]
+        enabled = self.client.put(
+            f"/v2/users/test-user/memory/events/{event_id}/followup", json={"enabled": True},
+        )
+        self.assertEqual(enabled.status_code, 200)
+
         query = self.client.post(
             "/v2/users/test-user/memory/query",
             json={
@@ -1440,7 +1452,11 @@ class MemoryApiTest(unittest.TestCase):
                 }
                 before = self.client.post(root + "/memory/query", json=query)
                 self.assertEqual(before.status_code, 200)
-                self.assertTrue(before.json()["compiled_context"]["style_policy"])
+                if storage == "normalized":
+                    self.assertTrue(before.json()["compiled_context"]["style_policy"])
+                else:
+                    # V2 never imports ungoverned legacy data implicitly.
+                    self.assertEqual(before.json()["candidates"], [])
                 settings = self.client.put(root + "/memory/settings", json={"memory_enabled": False})
                 self.assertEqual(settings.status_code, 200)
 
@@ -1662,6 +1678,7 @@ class MemoryApiTest(unittest.TestCase):
     def test_v2_ingest_llm_sensitive_candidate_enters_review_queue(self) -> None:
         user_id = f"llm-review-user-{uuid4().hex}"
         session_id = f"llm-review-session-{uuid4().hex}"
+        self.client.put(f"/v2/users/{user_id}/memory/settings", json={"allow_sensitive_memory": True})
         response = self.client.post(
             f"/v2/users/{user_id}/turns/ingest",
             json={
@@ -1728,6 +1745,7 @@ class MemoryApiTest(unittest.TestCase):
         self.assertEqual(query.json()["candidates"], [])
 
     def test_v2_review_queue_approval_api(self) -> None:
+        self.client.put("/v2/users/test-user/memory/settings", json={"allow_sensitive_memory": True})
         session_id = f"phase2-review-{uuid4().hex}"
         ingest = self.client.post(
             "/v2/users/test-user/turns/ingest",
