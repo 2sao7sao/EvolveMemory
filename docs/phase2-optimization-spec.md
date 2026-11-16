@@ -1,5 +1,7 @@
 # EvolveMemory Phase 2 Optimization Spec
 
+> Historical architecture proposal. Updated direction, 2026-11-16: ordinary inferred preferences should accumulate and adapt automatically from independent evidence, and revise with correction or change. The earlier universal profile-confirmation policy is superseded. Weak evidence is tentative, not a default confirmation request. Use [positioning](positioning.md), [the current plan](next-development-spec.md), and [runtime reference](runtime-reference.md) for current behavior and validation; old status percentages, schemas, and numeric targets below are not current acceptance evidence.
+
 **Document version:** v1.0  
 **Target project:** `2sao7sao/EvolveMemory`  
 **Recommended repository path:** `docs/phase2-optimization-spec.md`  
@@ -456,7 +458,8 @@ Rules:
 
 - 不能当作硬事实。
 - 默认 `style_only`。
-- 必须有 evidence accumulation。
+- 必须有独立来源的 evidence accumulation；充分后默认自动适配，不逐项要求画像确认。
+- 反证和用户纠错应持续修正推断，区分稳定偏好、长期变化与情境例外。
 - 必须可被用户查看和纠正。
 - 单次弱信号不能形成强 profile。
 
@@ -1790,7 +1793,7 @@ class UserMemorySettings(BaseModel):
     disabled_keys: list[str] = Field(default_factory=list)
     disabled_layers: list[MemoryLayer] = Field(default_factory=list)
     review_required_for_sensitivity: list[Sensitivity] = Field(default_factory=lambda: ["sensitive", "restricted"])
-    review_required_for_layers: list[MemoryLayer] = Field(default_factory=lambda: ["inferred_profile"])
+    review_required_for_layers: list[MemoryLayer] = Field(default_factory=list)  # Review is opt-in; supported profiles adapt automatically.
 ```
 
 ### 18.4 Review Queue

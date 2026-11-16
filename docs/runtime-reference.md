@@ -4,11 +4,43 @@
 
 These formulas and interfaces describe the deterministic prototype. Module presence does not establish a complete hosted conversation loop or measured real-model improvements.
 
-## Controls and scope slice: 2026-11-16
+## Automatic understanding revision: 2026-11-16
 
-This section describes the **locally validated controls/scope implementation slice**. A complete S1 host, real-model calls, delivery receipts, and concurrent-revocation guarantees remain incomplete. These are local prototype boundaries, not verified production authentication or tenant isolation.
+The user superseded the earlier confirmed-only profile decision on 2026-11-16. The current direction is autonomous, revisable understanding from independent evidence: supported ordinary preferences can adapt the response without a per-profile confirmation step. Weak evidence remains tentative or unused rather than automatically generating a question. The aim is natural long-term collaboration; project tasks are the first scenario.
 
-Local results on 2026-11-16: pytest **115 passed, 72 subtests passed**; unittest **115 passed**; deterministic evals **11/11**, with no failures; adaptive replay **PASS**. Independent local review found no blocker within this slice. These results cover this implementation and the tests below; remote validation is determined by the associated implementation PR’s Checks, not by these local results.
+This revision's U0 implementation passed local rules/API checks: **157 pytest tests + 101 subtests**, **157 unittest tests**, **11/11 deterministic suites** (`failures=[]`), and **replay PASS**, using an isolated temporary data directory without provider calls. Implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). The historical PR #15 results remain separate. Rules and externally supplied `llm_payload` still provide proposals; no integrated real provider or complete multi-turn host experience is established.
+
+| Aspect | Revised contract |
+| --- | --- |
+| Promotion | Multiple independent, usable source turns may support automatic profile storage and relevant, natural style adaptation. No universal `user_review_approved` requirement. Model confidence alone and repeated copies of one turn are insufficient. |
+| Revision | Explicit correction and counter-evidence can weaken, replace, or retire an inference. Stable defaults, persistent change, and contextual exceptions must be distinguished; broad coverage of these cases remains an acceptance goal. |
+| Weak evidence | Keep provisional or suppress; do not require the user to verify every uncertain impression. Clarify only when a material current ambiguity warrants it. |
+| Natural use | Apply relevant preferences without profile labels, repeated provenance recitals, or unrelated reminders. Explain the inference when asked, or when a changed fact/conflict needs context. |
+| Controls | Scope, source validity, disabled keys/layers, `allow_inferred_profile`, sensitive-data policy, and master opt-out still constrain accumulation and use. |
+| Review | Explicitly configured review and sensitive/restricted policies remain available. Ordinary evidence-backed profile adaptation does not wait for a review marker by default. |
+
+See [experience acceptance U01–U08](next-development-spec.md#fixed-experience-acceptance). These are requirements, not evidence that real responses already feel natural.
+
+### Candidate implementation details and limits
+
+The following U0 behavior is implemented and covered by the local checks above. Experience acceptance U01–U08 remains uncompleted; the next step is S1-a minimal host and temporary context:
+
+| Mechanism | Current behavior and boundary |
+| --- | --- |
+| Server qualification | The server can attach `metadata.profile_qualification={"policy_version":"autonomous-v1","method":"scoped_turn_evidence","distinct_turn_count":N}` only from its controlled live evidence pool. An external `llm_payload` claiming this marker does not grant qualification. |
+| Bounded evidence rule | At least **2 distinct real source turns**, net support **≥ 1.2**, the most recent **8 turns per dimension**, and a **30-day half-life** without a permanent weight floor. Ties do not select a winner. These are engineering heuristics, not measured psychological or model-quality thresholds. |
+| Read-time re-evaluation | Query and prompt-context recompute qualification against the current clock and live sources in the same scope. A profile can stop being used as support decays or becomes unavailable even without another ingest. This is read-time suppression, not proof of complete dependency cleanup or concurrent revocation. |
+| Review defaults and migration | `review_required_for_layers=[]`. Old settings without an explicit marker whose list is exactly `["inferred_profile"]` move to the automatic default; the old list and migration reason are retained in `legacy_review_required_for_layers` and `review_policy_migration`. The old schema cannot distinguish that historical default from a manual choice of the identical list; the migration records this ambiguity. New PUT requests that set the review field mark `review_required_for_layers_explicit=true`; explicit policies are retained. |
+| Ingest retry identity | Optional `turn_id` lets a host reuse the same source-turn identity for a retry. If omitted, each request receives a new identity. Do not claim default request idempotence; hosts must supply stable IDs when they need retry deduplication. |
+| Direct profile correction | Explicit `POST /v2/users/{user_id}/memory/{memory_id}/correct` creates new user-provided evidence for the corrected value. The old inference sources stay with the old version/audit; they must not continue filtering the corrected value through the old evidence pool. Compiled response policy and prompt instructions must also use the corrected value, without retaining an old high-value instruction. This does not fabricate `user_review_approved`. Current settings and scope still apply. |
+| Current-turn override | Both context routes recognize a finite set of current preference overrides, suppress conflicting older style for that query, and do not persist the override as a long-term preference. Negation, quoted text, and broader contextual reasoning remain bounded by the rules. |
+| Natural-style prompting | Prompt instructions encourage applying preferences without reciting profile labels or recalling old events to demonstrate memory. No response-history repetition controller or measured natural-conversation guarantee is established. |
+
+## Controls and scope foundation: PR #15
+
+This section records the **PR #15 controls/scope foundation**. The profile policy is revised above; the remaining storage and scope boundaries are retained. A complete S1 host, real-model calls, delivery receipts, and concurrent-revocation guarantees remain incomplete. These are local prototype boundaries, not verified production authentication or tenant isolation.
+
+Local results on 2026-11-16: pytest **115 passed, 72 subtests passed**; unittest **115 passed**; deterministic evals **11/11**, with no failures; adaptive replay **PASS**. Independent local review found no blocker within this slice. These historical results belong to [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15), merged at `8e3ab17` with [passing CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401). They do not validate this revision’s automatic-understanding change.
 
 ### One v2 storage and read path
 
@@ -20,6 +52,7 @@ Both v2 read endpoints use `prepare_v2_query`. Scoped selection and `apply_read_
 
 | Surface / field | Implemented semantics |
 | --- | --- |
+| Ingest `turn_id` | Optional source identity. Reuse it for a host retry; omission creates a new identity per request, not default idempotence. |
 | Ingest `session_id`, `project_id`, `domain` | Current context supplied by the trusted host, not authorization inferred from query text. |
 | Ingest `memory_scope` | `turn/session/project/domain/global`; defaults to `session`. Natural language can narrow to temporary turn/session scope, never authorize broader sharing. |
 | Query / prompt-context `session_id`, `project_id`, `domain` | Session records match session and project exactly. `None` means an unbound value, not all records for a user. |
@@ -48,9 +81,9 @@ Then it ingests a project-A record:
 
 A later same-project query can use `{"session_id":"thread-A2","project_id":"project-A","query":"在本项目中怎么回答代码 review 问题？"}`. `project-B` or an unbound project does not inherit access to A. Relevance or the word “global” in a message does not enable sharing.
 
-### Profile review, event follow-ups, and revalidation
+### Profile evidence, event follow-ups, and revalidation
 
-- An inferred profile must pass current settings/scope and carry the actual review-resolution marker `metadata.user_review_approved=true`, with `review_id` and approval time. Confidence, previous `allowed_use`, or a global profile switch does not replace that confirmation. Disabled supporting records must not be reintroduced through the profile.
+- Under the revised default, a profile can adapt automatically when independent evidence satisfies the inference policy and current settings/scope permit use. The old universal `metadata.user_review_approved=true` requirement from PR #15 is superseded; manual approval can still exist when explicitly configured. Disabled, stale, deleted, or out-of-scope support cannot be reintroduced through a profile. The local checks cover this rule/API behavior; they do not prove broad contextual understanding or natural responses.
 - Event follow-ups are off by default per event. `PUT /v2/users/{user_id}/memory/events/{memory_id}/followup` with `{"enabled":true}` enables one event; `{"enabled":false}` disables it. Global `allow_event_followup` and current record controls still apply. Enabling the global switch does not opt in every event.
 - Review resolution rechecks settings when approval is requested. If key/layer/sensitivity/project/global permission has been withdrawn since queuing, it returns **409** and preserves **pending** rather than marking the item approved first.
 - Correction accepts ACTIVE targets only. Deletion and forget-all cancel related pending reviews. Approval rechecks target/source state, scope, settings, and time so a queued proposal cannot revive a deleted or expired source.
@@ -262,7 +295,7 @@ review, and contradictions may merge, supersede, or ask the user.
 | Result path | Decision owner |
 | --- | --- |
 | `create` | Score passes threshold and no review policy blocks it. |
-| `review` | Sensitivity, restricted consent, low confidence, or lower authority needs user confirmation. |
+| `review` | An explicit review policy or sensitive/restricted rule needs user input. Ordinary weak profile evidence stays tentative or unused; it does not inherently request confirmation. |
 | `merge` | Duplicate evidence should attach to an existing record. |
 | `supersede` | A higher-or-equal authority candidate replaces an exclusive conflicting value. |
 | `reject` | Settings, explicit refusal, hard confidence floor, or low weighted utility blocks the write. |

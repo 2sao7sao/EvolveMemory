@@ -47,6 +47,10 @@ class ScopePersistenceTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.path = Path(self.directory.name) / "memory.sqlite3"
         self.repo = NormalizedSQLiteMemoryRepository(self.path)
+        self.allowed_settings = UserMemorySettings(
+            enabled_project_ids=["project-a", "project-b"], allow_global_memory=True,
+        )
+        self.write_context = WritePolicyContext(settings=self.allowed_settings)
 
     def test_old_database_migration_preserves_records_and_is_idempotent(self) -> None:
         # Recreate the pre-scope schema, including an existing record, rather than
@@ -161,14 +165,14 @@ class ScopePersistenceTest(unittest.TestCase):
             for value in ("direct", "detailed"):
                 other.value = other.normalized_value = value
                 with self.subTest(boundary=other.scope_identity(), value=value):
-                    operation = evaluator.evaluate(candidate, [other])
+                    operation = evaluator.evaluate(candidate, [other], self.write_context)
                     self.assertEqual(operation.operation, MemoryOperationType.CREATE)
                     self.assertIsNone(operation.target_memory_id)
         same_project_other_session = record(session_id="session-b")
-        operation = evaluator.evaluate(candidate, [same_project_other_session])
+        operation = evaluator.evaluate(candidate, [same_project_other_session], self.write_context)
         self.assertEqual(operation.operation, MemoryOperationType.ADD_EVIDENCE_ONLY)
         changed = record(value="detailed", normalized_value="detailed")
-        self.assertEqual(evaluator.evaluate(changed, [candidate]).operation,
+        self.assertEqual(evaluator.evaluate(changed, [candidate], self.write_context).operation,
                          MemoryOperationType.SUPERSEDE)
 
     def test_session_domain_and_global_conflict_boundaries(self) -> None:
@@ -185,7 +189,7 @@ class ScopePersistenceTest(unittest.TestCase):
             (record(scope="global"), record(scope="global", project_id="project-b", session_id=None), True),
         ]:
             with self.subTest(candidate=candidate.scope_identity(), other=other.scope_identity()):
-                operation = evaluator.evaluate(candidate, [other])
+                operation = evaluator.evaluate(candidate, [other], self.write_context)
                 self.assertEqual(operation.operation, MemoryOperationType.ADD_EVIDENCE_ONLY
                                  if expected else MemoryOperationType.CREATE)
 
@@ -209,11 +213,11 @@ class ScopePersistenceTest(unittest.TestCase):
     def test_same_key_in_two_projects_does_not_overwrite_other_project(self) -> None:
         evaluator = WeightedMemoryWriteEvaluatorV2()
         project_a = record()
-        self.repo.apply_operation(evaluator.evaluate(project_a))
+        self.repo.apply_operation(evaluator.evaluate(project_a, context=self.write_context))
         project_b = record(project_id="project-b", value="detailed", normalized_value="detailed")
-        self.repo.apply_operation(evaluator.evaluate(project_b, self.repo.list_records(user_id="user-a")))
+        self.repo.apply_operation(evaluator.evaluate(project_b, self.repo.list_records(user_id="user-a"), self.write_context))
         updated_a = record(value="balanced", normalized_value="balanced", session_id="new-session")
-        self.repo.apply_operation(evaluator.evaluate(updated_a, self.repo.list_records(user_id="user-a")))
+        self.repo.apply_operation(evaluator.evaluate(updated_a, self.repo.list_records(user_id="user-a"), self.write_context))
         active = self.repo.list_records(user_id="user-a")
         self.assertEqual({(item.project_id, item.value) for item in active},
                          {("project-a", "balanced"), ("project-b", "detailed")})
@@ -239,7 +243,9 @@ class ScopePersistenceTest(unittest.TestCase):
     def test_review_approval_metadata_survives_storage(self) -> None:
         self.repo.upsert_user_settings("user-a", UserMemorySettings(enabled_project_ids=["project-a"]))
         candidate = record(layer=MemoryLayer.INFERRED_PROFILE)
-        operation = WeightedMemoryWriteEvaluatorV2().evaluate(candidate)
+        operation = WeightedMemoryWriteEvaluatorV2().evaluate(candidate, context=WritePolicyContext(
+                    settings=replace(self.allowed_settings, review_required_for_layers=[MemoryLayer.INFERRED_PROFILE]),
+                ))
         self.repo.apply_operation(operation, created_at=NOW)
         review = self.repo.list_review_items(user_id="user-a")[0]
         saved = self.repo.resolve_review_item(str(review["id"]), approve=True, resolved_at=NOW)[0]
@@ -251,15 +257,17 @@ class ScopePersistenceTest(unittest.TestCase):
 
     def test_settings_changed_after_review_prevent_approval_and_keep_pending(self) -> None:
         for settings in (
-            UserMemorySettings(memory_enabled=False),
-            UserMemorySettings(disabled_keys=["communication_style"]),
-            UserMemorySettings(disabled_layers=[MemoryLayer.INFERRED_PROFILE]),
-            UserMemorySettings(allow_inferred_profile=False),
+            replace(self.allowed_settings, memory_enabled=False),
+            replace(self.allowed_settings, disabled_keys=["communication_style"]),
+            replace(self.allowed_settings, disabled_layers=[MemoryLayer.INFERRED_PROFILE]),
+            replace(self.allowed_settings, allow_inferred_profile=False),
         ):
             with self.subTest(settings=settings):
                 candidate = record(layer=MemoryLayer.INFERRED_PROFILE)
-                self.repo.upsert_user_settings("user-a", UserMemorySettings())
-                self.repo.apply_operation(WeightedMemoryWriteEvaluatorV2().evaluate(candidate))
+                self.repo.upsert_user_settings("user-a", self.allowed_settings)
+                self.repo.apply_operation(WeightedMemoryWriteEvaluatorV2().evaluate(candidate, context=WritePolicyContext(
+                    settings=replace(self.allowed_settings, review_required_for_layers=[MemoryLayer.INFERRED_PROFILE]),
+                )))
                 review = next(item for item in self.repo.list_review_items(user_id="user-a")
                               if json.loads(item["candidate_json"])["id"] == str(candidate.id))
                 self.repo.upsert_user_settings("user-a", settings)
@@ -274,14 +282,15 @@ class ScopePersistenceTest(unittest.TestCase):
                 candidate = record(sensitivity=sensitivity)
                 evaluator = WeightedMemoryWriteEvaluatorV2()
                 result = evaluator.evaluate(candidate, context=WritePolicyContext(
-                    user_command="remember", user_consent=True,
+                    user_command="remember", user_consent=True, settings=self.allowed_settings,
                 ))
                 self.assertEqual(result.operation, MemoryOperationType.REJECT)
-                allowed = UserMemorySettings(allow_sensitive_memory=True)
+                allowed = replace(self.allowed_settings, allow_sensitive_memory=True)
                 operation = evaluator.evaluate(candidate, context=WritePolicyContext(
                     settings=allowed, user_consent=True,
                 ))
                 self.assertEqual(operation.operation, MemoryOperationType.ASK_USER_CONFIRMATION)
+                self.repo.upsert_user_settings("user-a", self.allowed_settings)
                 self.repo.apply_operation(operation)
                 review = next(item for item in self.repo.list_review_items(user_id="user-a")
                               if json.loads(item["candidate_json"])["id"] == str(candidate.id))
@@ -297,7 +306,9 @@ class ScopePersistenceTest(unittest.TestCase):
             with self.subTest(scope=scope):
                 candidate = record(scope=scope, project_id=project_id, domain=domain,
                                    layer=MemoryLayer.INFERRED_PROFILE)
-                self.repo.apply_operation(WeightedMemoryWriteEvaluatorV2().evaluate(candidate))
+                self.repo.apply_operation(WeightedMemoryWriteEvaluatorV2().evaluate(candidate, context=WritePolicyContext(
+                    settings=replace(self.allowed_settings, review_required_for_layers=[MemoryLayer.INFERRED_PROFILE]),
+                )))
                 review = next(item for item in self.repo.list_review_items(user_id="user-a")
                               if json.loads(item["candidate_json"])["id"] == str(candidate.id))
                 with self.assertRaisesRegex(ValueError, "current memory settings"):
@@ -310,14 +321,14 @@ class ScopePersistenceTest(unittest.TestCase):
                 self.assertEqual([item.id for item in persisted], [candidate.id])
                 self.repo.upsert_user_settings("user-a", UserMemorySettings())
 
-    def test_profile_confirmation_is_required_even_if_review_list_is_empty(self) -> None:
+    def test_unsupported_profile_stays_ephemeral_without_requesting_confirmation(self) -> None:
         candidate = record(layer=MemoryLayer.INFERRED_PROFILE)
-        settings = UserMemorySettings(review_required_for_layers=[])
+        settings = replace(self.allowed_settings, review_required_for_layers=[])
         evaluator = WeightedMemoryWriteEvaluatorV2()
         existing = candidate.model_copy(deep=True)
         for previous in ([], [existing]):
             result = evaluator.evaluate(candidate, previous, WritePolicyContext(settings=settings))
-            self.assertEqual(result.operation, MemoryOperationType.ASK_USER_CONFIRMATION)
+            self.assertEqual(result.operation, MemoryOperationType.EPHEMERAL_ONLY)
         blocked = replace(settings, allow_inferred_profile=False)
         candidate.metadata["user_review_approved"] = True
         self.assertEqual(evaluator.evaluate(candidate, context=WritePolicyContext(settings=blocked)).operation,
@@ -327,7 +338,7 @@ class ScopePersistenceTest(unittest.TestCase):
         for scope in ("turn", "session"):
             with self.subTest(scope=scope):
                 result = WeightedMemoryWriteEvaluatorV2().evaluate(record(), context=WritePolicyContext(
-                    scope=scope, user_command="remember",
+                    scope=scope, user_command="remember", settings=self.allowed_settings,
                 ))
                 self.assertEqual(result.operation, MemoryOperationType.EPHEMERAL_ONLY)
                 self.assertEqual(self.repo.apply_operation(result), [])
