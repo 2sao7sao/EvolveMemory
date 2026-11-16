@@ -1,12 +1,12 @@
 # EvolveMemory maintenance status
 
-Review date: **2026-11-16**. Baseline: [`c628f00`](https://github.com/2sao7sao/EvolveMemory/commit/c628f00eb0ae5d03fee2e6d5e4208265be115a7d). This record separates the observed remote state from checks of this maintenance change.
+Review date: **2026-11-16**. Original maintenance baseline: [`c628f00`](https://github.com/2sao7sao/EvolveMemory/commit/c628f00eb0ae5d03fee2e6d5e4208265be115a7d). PR #13 has since merged into `main@3aa4285`. This record preserves that round's evidence separately from the new controls/scope implementation slice and its local checks. Remote validation is determined by the associated implementation PR’s Checks.
 
 ## Recommendation
 
-**Continue maintenance.** There is a working deterministic prototype and an unresolved conversation-design draft. The immediate milestone is correctness of existing controls and a complete, bounded single-thread conversation path. Archiving now would abandon known unfinished work; a full production claim is not supported either.
+**Continue maintenance.** The user has selected project-task continuation and confirmed same-project authorized reuse, confirmed-only personal-profile adaptation, per-event opt-in follow-ups, and conditional source hints. The immediate milestone is consistent controls and scope, followed by a bounded host-delivery path. A full conversation or production claim is not supported.
 
-## Observed GitHub state
+## Original GitHub snapshot before PR #13
 
 | Item | Evidence |
 | --- | --- |
@@ -17,7 +17,7 @@ Review date: **2026-11-16**. Baseline: [`c628f00`](https://github.com/2sao7sao/E
 | Default-branch CI | [2026-06-05 run](https://github.com/2sao7sao/EvolveMemory/actions/runs/27003917088) succeeded at that time. It is not proof the unchanged tests still pass today. |
 | Product page | [2026-06-04 Pages deployment](https://github.com/2sao7sao/EvolveMemory/actions/runs/26938850244) failed at `actions/configure-pages@v5`; upload and deployment steps were skipped. The repository Pages API returned HTTP 404 on 2026-11-16, confirming there is no configured Pages site. The optional deployment workflow is now manual-only until Pages is configured; code CI remains automatic. |
 
-## This maintenance change
+## Completed PR #13 maintenance change
 
 ### Existing behavior repaired
 
@@ -25,6 +25,8 @@ Review date: **2026-11-16**. Baseline: [`c628f00`](https://github.com/2sao7sao/E
 2. **Migration time:** `migrate_store` now accepts an optional `now` parameter and passes it to the existing active-memory filter. Existing callers still use the live clock by default. Tests supply a fixed time and separately verify that a later migration excludes the expired event while retaining the durable preference.
 
 Scope: these changes fix the two reproduced behaviors. They do not implement PR #12, add new cross-thread access, complete fine-grained read policies, or change the legacy session-only API's settings model.
+
+The legacy fallback mentioned in this historical section describes PR #13's baseline behavior. The newer candidate below removes implicit v2 fallback and dual-writing entirely; it does not delete the old `/sessions` store or extend v2 governance to that old API.
 
 ### Validation
 
@@ -41,14 +43,46 @@ The HTTP regressions use FastAPI TestClient. They first verify that default-enab
 
 The maintenance PR CI passed on 2026-11-16 at `68d12e2`: [hosted CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43888749021). This does not rerun or approve the separate draft PR #12.
 
+## Current controls/scope slice — local checks passed
+
+The following implementation passed the local checks below. Independent local review found no blocker within this slice. None of PR #13's earlier counts are reused as this slice's validation; hosted CI must be read from the associated implementation PR.
+
+| Area | Implemented behavior | Local evidence and boundary |
+| --- | --- | --- |
+| v2 storage | Normalized-only reads/writes; no implicit legacy session fallback or dual-write. Existing `/sessions` data remains and can be explicitly migrated with `migrate_store`. | Isolation plus existing explicit-migration tests; no claims of v2 governance on the old session API. |
+| Shared read controls | Both v2 context endpoints use `prepare_v2_query` and `apply_read_controls` before scoring/debug output. Keys, layers, sensitivity, and unconfirmed profiles are filtered. | Query/prompt pairs and excluded-content assertions in `tests/test_v2_controls.py`. |
+| Scope persistence and selection | Ingest adds `project_id`, `domain`, `memory_scope`; query adds `project_id`, `domain`. Session/project values match exactly, including `None` as unbound. | Save/reload/adapter, same-project record reuse, cross-project exclusion, and no omitted-identifier expansion cases. |
+| Explicit sharing | `enabled_project_ids=[]` and `allow_global_memory=false` by default. Project/global reads and writes require enablement; language can narrow temporary scope only. | Disabled/enabled pairs, revocation, and temporary-language tests. |
+| Profile and temporary-write controls | Profiles need an actual review marker; temporary instructions, `auto_write=false`, and master-off do not derive profile evidence. | Marker, disabled/expired source, and no-derived-write cases. |
+| Event follow-up | `PUT /v2/users/{user_id}/memory/events/{memory_id}/followup` with `{enabled}` controls one event, off by default and constrained by global settings. | Per-event/global/scope control cases; no user-delivery receipt or concurrent quota proof. |
+| Review and lifecycle | Approval rechecks current target/source state, scope, settings, and time; withdrawal returns 409/pending. Correction is ACTIVE-only; delete/forget-all cancel related pending reviews. | Inactive/missing targets, deleted/expired sources, scope opt-out, and pending-cancellation cases. |
+| Evidence identity and schema | Profile evidence uses real record IDs plus source_turn_id deduplication. Existing rows survive old-schema migrations. | Record/evidence schema preservation, repeat migration, distinct-turn, and duplicate-source cases in `tests/test_scope_persistence.py`. |
+
+Small-scale reuse of project-scoped records is not a complete cross-thread source-history system. This slice does not implement complete S1, real-model calls, user-delivery receipts, or concurrent-revocation guarantees. The prototype trusts host identity/context; this review does not establish production authentication or tenant isolation.
+
+### Slice local validation
+
+Verified locally on 2026-11-16 against this implementation slice, based on `main@3aa4285`:
+
+| Command | Result | What it establishes |
+| --- | --- | --- |
+| `python3 -m pytest -q` | **115 passed, 72 subtests passed** | The repository's current local test cases; subtests are not 72 additional test methods. |
+| `python3 -m unittest discover -s tests -p 'test_*.py'` | **115 passed** | Same suite through the CI-style runner. |
+| `python3 -m evals.runner --suite all` | **11/11 suites**, `failures=[]` | Deterministic seed evaluations, no provider call. |
+| `python3 examples/replay_adaptive_memory.py` | **PASS** | Existing standalone runtime replay, not a v2 host conversation or real-model acceptance. |
+
+Evidence was captured in `reports/EvolveMemory-controls-validation/` in the maintenance workspace: `summary.json`, `pytest.log`, `unittest.log`, `evals.json`, and `replay.log`. The test files in this change provide reproducible cases; the external workspace logs are not an in-repository hosted artifact.
+
+These results apply to this slice’s code and reproducible tests; remote Checks and merge status belong to the associated implementation PR. Local results do not complete S0-c, concurrent revocation, full dependency invalidation, S1 multi-turn delivery, or real-provider validation. The concrete interface is documented in [English](runtime-reference.md) and [Chinese](runtime-reference.zh-CN.md).
+
 ## Next milestones
 
 | Priority | Work | Acceptance / blocker |
 | --- | --- | --- |
-| P0 | Carry the read opt-out and deterministic migration fixes onto the maintained branch | CI passes on the exact published revision; preserve the pre-fix evidence. |
-| P1 | Review PR #12's product defaults | Decide cross-thread scope, inferred-profile use, and visibility rules. Keep the PR draft until these are resolved. |
-| P1 | Implement the first bounded conversation slice | Cover old decisions, source references, current-turn overrides, opt-out and stale-event behavior through a single host interface. Module checkmarks alone are insufficient. |
-| P1 | Audit fine-grained read controls | Independently test disabled keys/layers, inferred profiles and event follow-up settings on already stored records. This review fixed the master opt-out only. |
+| P0 | Keep the controls/scope slice and its regressions passing | Local checks pass; remote Checks must verify the associated implementation revision. |
+| P1 | Update PR #12 to the confirmed product choices and current baseline | Keep protocol requirements, implemented candidate behavior, and validation results separate. |
+| P1 | Add the minimal host and capture actual delivery input | A deterministic callable receives only permitted context; compiling a prompt alone is not delivery or a real-model result. |
+| P1 | Complete the bounded project-task conversation slice | Recover old decisions with sources, apply current-turn overrides, and handle stale events through one host interface. |
 | P2 | Restore Pages configuration | Read the failing job logs and repository Pages configuration; verify a successful deployment before advertising a live product page. |
 | P2 | Replace the hash embedding substitute and connect an extraction provider | Version the dataset and provider; measure quality, latency, cost, and failures. Avoid presenting seeded replay scores as real-model gains. |
 | P2 | Build governance UI and production controls | Authentication, tenant isolation, encryption, retention and deployment checks remain unverified. |

@@ -19,10 +19,10 @@ class MemoryScope(str, Enum):
 
 TEMPORAL_SCOPE_PATTERNS: dict[MemoryScope, list[str]] = {
     MemoryScope.TURN: [
-        "这次", "这回", "本次", "just this time", "only now", "for now",
+        "这次", "这回", "本次", "本轮", "just this time", "this turn", "only now", "for now",
     ],
     MemoryScope.SESSION: [
-        "今天", "这个对话", "这轮", "this session", "today",
+        "这个对话", "本次会话", "今天回答", "今天先按", "this session", "for today only",
     ],
     MemoryScope.PROJECT: [
         "这个项目", "这个 repo", "in this project", "for this project",
@@ -51,7 +51,7 @@ class ScopeResolver:
         turn: PreprocessedTurn | None = None,
         text: str = "",
     ) -> tuple[MemoryScope, float]:
-        source_text = text or (turn.text if turn else "")
+        source_text = (text or (turn.text if turn else "")).lower()
         if not source_text:
             return self._fallback_from_candidate(candidate)
 

@@ -23,6 +23,7 @@ class ProfileEvidence:
     session_id: str | None = None
     id: UUID = field(default_factory=uuid4)
     metadata: dict[str, Any] = field(default_factory=dict)
+    source_turn_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -35,6 +36,7 @@ class ProfileEvidence:
             "weight": self.weight,
             "polarity": self.polarity,
             "source_memory_id": str(self.source_memory_id),
+            "source_turn_id": self.source_turn_id,
             "source_key": self.source_key,
             "quote": self.quote,
             "observed_at": self.observed_at.isoformat(),
@@ -53,6 +55,7 @@ class ProfileEvidence:
             weight=float(payload["weight"]),
             polarity=payload["polarity"],
             source_memory_id=UUID(payload["source_memory_id"]),
+            source_turn_id=payload.get("source_turn_id") or None,
             source_key=payload["source_key"],
             quote=payload["quote"],
             observed_at=datetime.fromisoformat(payload["observed_at"]),
@@ -120,6 +123,10 @@ class ProfileEvidenceExtractor:
             mapped = self._map_record(record)
             if not mapped:
                 continue
+            # A merged record can contain several historical turns but only one
+            # quote. Do not manufacture independent evidence from that aggregate.
+            source_turns = set(record.source_turn_ids)
+            source_turn_id = next(iter(source_turns)) if len(source_turns) == 1 else None
             for dimension, value, weight, polarity in mapped:
                 evidence.append(
                     ProfileEvidence(
@@ -131,6 +138,7 @@ class ProfileEvidenceExtractor:
                         weight=weight,
                         polarity=polarity,
                         source_memory_id=record.id,
+                        source_turn_id=source_turn_id,
                         source_key=record.key,
                         quote=str(record.metadata.get("evidence", record.value)),
                         observed_at=record.observed_at,

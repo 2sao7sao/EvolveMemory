@@ -47,6 +47,16 @@ class MemoryItem:
     allowed_use: list[str] = field(default_factory=list)
     sensitivity: str = "personal"
     memory_id: str | None = None
+    tenant_id: str | None = None
+    user_id: str | None = None
+    session_id: str | None = None
+    project_id: str | None = None
+    domain: str | None = None
+    scope: str | None = None
+    authority: str | None = None
+    source_turn_ids: list[str] = field(default_factory=list)
+    source_text_hash: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def is_active(self, now: datetime | None = None) -> bool:
         current = now or datetime.now(self.valid_from.tzinfo)
@@ -81,6 +91,16 @@ class MemoryItem:
             "allowed_use": self.allowed_use,
             "sensitivity": self.sensitivity,
             "memory_id": self.memory_id,
+            "tenant_id": self.tenant_id,
+            "user_id": self.user_id,
+            "session_id": self.session_id,
+            "project_id": self.project_id,
+            "domain": self.domain,
+            "scope": self.scope,
+            "authority": self.authority,
+            "source_turn_ids": list(self.source_turn_ids),
+            "source_text_hash": self.source_text_hash,
+            "metadata": dict(self.metadata),
         }
 
     @classmethod
@@ -107,6 +127,16 @@ class MemoryItem:
             allowed_use=list(payload.get("allowed_use", [])),
             sensitivity=payload.get("sensitivity", "personal"),
             memory_id=payload.get("memory_id"),
+            tenant_id=payload.get("tenant_id"),
+            user_id=payload.get("user_id"),
+            session_id=payload.get("session_id"),
+            project_id=payload.get("project_id"),
+            domain=payload.get("domain"),
+            scope=payload.get("scope"),
+            authority=payload.get("authority"),
+            source_turn_ids=list(payload.get("source_turn_ids", [])),
+            source_text_hash=payload.get("source_text_hash"),
+            metadata=dict(payload.get("metadata", {})),
         )
 
 

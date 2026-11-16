@@ -45,7 +45,7 @@ class ContradictionDetector:
         existing_records: list[MemoryRecord],
     ) -> Contradiction | None:
         for existing in existing_records:
-            if existing.status.value != "active":
+            if existing.status.value != "active" or not candidate.same_scope_as(existing):
                 continue
             if self._is_duplicate(candidate, existing):
                 return Contradiction("duplicate", existing, "same key and normalized value")
@@ -148,6 +148,25 @@ class WeightedMemoryWriteEvaluatorV2:
                 "explicit do-not-remember command",
                 factors,
             )
+        if (
+            candidate.sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
+            and not context.settings.allow_sensitive_memory
+        ):
+            return self._operation(
+                MemoryOperationType.REJECT,
+                candidate,
+                score,
+                "sensitive memory disabled by user settings",
+                factors,
+            )
+        if context.scope in ("turn", "session"):
+            return self._operation(
+                MemoryOperationType.EPHEMERAL_ONLY,
+                candidate,
+                score,
+                f"scope is {context.scope}; not persisted as long-term memory",
+                factors,
+            )
         if context.is_negative_preference:
             return self._operation(
                 MemoryOperationType.NEGATIVE_PREFERENCE,
@@ -156,14 +175,10 @@ class WeightedMemoryWriteEvaluatorV2:
                 "negative preference stored as suppression rule",
                 factors,
             )
-        if context.scope in ("turn", "session") and context.user_command != "remember":
-            return self._operation(
-                MemoryOperationType.EPHEMERAL_ONLY,
-                candidate,
-                score,
-                f"scope is {context.scope}; not persisted as long-term memory",
-                factors,
-            )
+        # Preserve the intended replacement while waiting for review. Detecting
+        # a conflict here does not authorize applying it before the policy gates.
+        contradiction = ContradictionDetector().detect(candidate, existing_records)
+        review_target = contradiction.existing.id if contradiction is not None else None
         if candidate.sensitivity == Sensitivity.RESTRICTED and not context.user_consent:
             return self._operation(
                 MemoryOperationType.ASK_USER_CONFIRMATION,
@@ -171,6 +186,7 @@ class WeightedMemoryWriteEvaluatorV2:
                 score,
                 "restricted memory requires explicit user consent",
                 factors,
+                target_memory_id=review_target,
                 requires_user_review=True,
             )
         if candidate.confidence < 0.45:
@@ -191,12 +207,9 @@ class WeightedMemoryWriteEvaluatorV2:
                 score,
                 "low-confidence sensitive memory requires review",
                 factors,
+                target_memory_id=review_target,
                 requires_user_review=True,
             )
-
-        contradiction = ContradictionDetector().detect(candidate, existing_records)
-        if contradiction is not None:
-            return self._resolve_contradiction(candidate, contradiction, score, factors)
 
         if score < self.threshold:
             return self._operation(
@@ -206,24 +219,32 @@ class WeightedMemoryWriteEvaluatorV2:
                 "below weighted write threshold",
                 factors,
             )
-        if candidate.sensitivity in context.settings.review_required_for_sensitivity:
+        reviewed = candidate.metadata.get("user_review_approved") is True
+        if candidate.sensitivity in context.settings.review_required_for_sensitivity and not reviewed:
             return self._operation(
                 MemoryOperationType.ASK_USER_CONFIRMATION,
                 candidate,
                 score,
                 "sensitivity policy requires review",
                 factors,
+                target_memory_id=review_target,
                 requires_user_review=True,
             )
-        if candidate.layer in context.settings.review_required_for_layers:
+        if not reviewed and (
+            candidate.layer == MemoryLayer.INFERRED_PROFILE
+            or candidate.layer in context.settings.review_required_for_layers
+        ):
             return self._operation(
                 MemoryOperationType.ASK_USER_CONFIRMATION,
                 candidate,
                 score,
                 "layer policy requires review",
                 factors,
+                target_memory_id=review_target,
                 requires_user_review=True,
             )
+        if contradiction is not None:
+            return self._resolve_contradiction(candidate, contradiction, score, factors)
         return self._operation(
             MemoryOperationType.CREATE,
             candidate,
@@ -331,7 +352,12 @@ class WeightedMemoryWriteEvaluatorV2:
 
     def _novelty(self, candidate: MemoryRecord, existing_records: list[MemoryRecord]) -> float:
         for existing in existing_records:
-            if existing.key == candidate.key and existing.normalized_value == candidate.normalized_value:
+            if (
+                candidate.same_scope_as(existing)
+                and existing.status.value == "active"
+                and existing.key == candidate.key
+                and existing.normalized_value == candidate.normalized_value
+            ):
                 return 0.25
         return 0.85
 

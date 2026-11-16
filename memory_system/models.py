@@ -106,6 +106,20 @@ class MemoryRecord(BaseModel):
         if not self.allowed_use:
             self.allowed_use = default_allowed_use(self.layer, self.sensitivity)
 
+    def scope_identity(self) -> tuple[object, ...]:
+        """Identity of the boundary within which records may replace each other."""
+        owner = (self.tenant_id, self.user_id, self.scope)
+        if self.scope in {"turn", "session"}:
+            return (*owner, self.session_id, self.project_id)
+        if self.scope == "project":
+            return (*owner, self.project_id)
+        if self.scope == "domain":
+            return (*owner, self.domain, self.project_id)
+        return owner
+
+    def same_scope_as(self, other: "MemoryRecord") -> bool:
+        return self.scope_identity() == other.scope_identity()
+
     @classmethod
     def from_memory_item(
         cls,
@@ -121,7 +135,11 @@ class MemoryRecord(BaseModel):
             if "sensitive" in item.tags
             else Sensitivity(item.sensitivity or Sensitivity.PERSONAL.value)
         )
-        authority = Authority.USER_EXPLICIT if item.confirmed_by_user else Authority.ASSISTANT_INFERRED
+        authority = (
+            Authority(item.authority)
+            if item.authority is not None
+            else Authority.USER_EXPLICIT if item.confirmed_by_user else Authority.ASSISTANT_INFERRED
+        )
         allowed_use = (
             [AllowedUse(value) for value in item.allowed_use]
             if item.allowed_use
@@ -130,7 +148,10 @@ class MemoryRecord(BaseModel):
         return cls(
             tenant_id=tenant_id,
             user_id=user_id,
-            session_id=session_id,
+            session_id=session_id if session_id is not None else item.session_id,
+            project_id=item.project_id,
+            domain=item.domain,
+            scope=item.scope or "session",
             layer=layer,
             key=item.key,
             value=item.value,
@@ -139,7 +160,8 @@ class MemoryRecord(BaseModel):
             authority=authority,
             sensitivity=sensitivity,
             allowed_use=allowed_use,
-            source_turn_ids=[item.source] if item.source else [],
+            source_turn_ids=list(item.source_turn_ids) or ([item.source] if item.source else []),
+            source_text_hash=item.source_text_hash,
             valid_from=item.valid_from,
             valid_to=item.valid_to,
             observed_at=item.valid_from,
@@ -148,6 +170,7 @@ class MemoryRecord(BaseModel):
             coexistence_rule=item.coexistence_rule,  # type: ignore[arg-type]
             tags=list(item.tags),
             metadata={
+                **item.metadata,
                 "legacy_type": item.memory_type.value,
                 "evidence": item.evidence,
                 "dynamics": item.dynamics.value,
