@@ -8,7 +8,7 @@ These formulas and interfaces describe the deterministic prototype. Module prese
 
 The user superseded the earlier confirmed-only profile decision on 2026-11-16. The current direction is autonomous, revisable understanding from independent evidence: supported ordinary preferences can adapt the response without a per-profile confirmation step. Weak evidence remains tentative or unused rather than automatically generating a question. The aim is natural long-term collaboration; project tasks are the first scenario.
 
-This revision's U0 implementation passed local rules/API checks: **157 pytest tests + 101 subtests**, **157 unittest tests**, **11/11 deterministic suites** (`failures=[]`), and **replay PASS**, using an isolated temporary data directory without provider calls. Branch `feat/autonomous-understanding-20261116` awaits remote publication and Checks; it is not claimed merged to main. The historical PR #15 results remain separate. Rules and externally supplied `llm_payload` still provide proposals; no integrated real provider or complete multi-turn host experience is established.
+This revision's U0 implementation passed local rules/API checks: **157 pytest tests + 101 subtests**, **157 unittest tests**, **11/11 deterministic suites** (`failures=[]`), and **replay PASS**, using an isolated temporary data directory without provider calls. Implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). The historical PR #15 results remain separate. Rules and externally supplied `llm_payload` still provide proposals; no integrated real provider or complete multi-turn host experience is established.
 
 | Aspect | Revised contract |
 | --- | --- |

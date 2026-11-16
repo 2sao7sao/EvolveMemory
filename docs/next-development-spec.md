@@ -1,6 +1,6 @@
 # EvolveMemory Next Development Spec v0.3
 
-Updated **2026-11-16** after the user's direction correction. The earlier confirmed-only profile decision is superseded: AI should autonomously develop and revise its understanding from evidence, then adapt naturally within existing controls. The new U0 implementation slice passed local checks; remote publication and Checks are pending. PR #15 results describe its earlier baseline.
+Updated **2026-11-16** after the user's direction correction. The earlier confirmed-only profile decision is superseded: AI should autonomously develop and revise its understanding from evidence, then adapt naturally within existing controls. The new U0 implementation slice passed local checks; implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). PR #15 results describe its earlier baseline.
 
 ## Product direction
 
@@ -43,7 +43,7 @@ The full architecture is a target. The present extractor uses rules and external
 
 ### Current local validation
 
-On 2026-11-16, implementation branch `feat/autonomous-understanding-20261116` passed **157 pytest tests + 101 subtests**, **157 unittest tests**, **11/11 deterministic eval suites** (`failures=[]`), and **adaptive replay PASS**, using an isolated temporary data directory without a provider call. Remote publication and Checks are pending; the implementation is not yet claimed merged to main.
+On 2026-11-16, implementation branch `feat/autonomous-understanding-20261116` passed **157 pytest tests + 101 subtests**, **157 unittest tests**, **11/11 deterministic eval suites** (`failures=[]`), and **adaptive replay PASS**, using an isolated temporary data directory without a provider call. Implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16).
 
 The local U0 rules/API slice is complete. Experience acceptance U01–U08 remains open: tests of state, evidence, and compiled policy do not establish natural multi-turn answers. The next delivery step is **S1-a minimal host plus temporary context / S0-c**, followed by observed response and user-experience evaluation. Commands and evidence are recorded in [maintenance](maintenance.md).
 

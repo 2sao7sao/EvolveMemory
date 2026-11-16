@@ -16,7 +16,7 @@ Implemented candidate details: server-granted `autonomous-v1` qualification from
 
 Direct profile `/correct` now records new user-provided evidence for the correction; old inference sources remain on the old version/audit rather than filtering the corrected value through the old pool. It does not fabricate a review-approval marker.
 
-The U0 implementation on branch `feat/autonomous-understanding-20261116` passed the local checks below on 2026-11-16, using an isolated temporary data directory without provider calls. Remote publication and Checks are pending; this is not a claim that the new revision is merged to main. The 115 tests / 72 subtests and CI in the historical PR #15 section belong to that older baseline, including its old profile policy, and remain separate. Broad stable/change/context reasoning, a minimal host, real provider, and natural-conversation experience remain open. See [positioning](positioning.md) and [U01–U08 acceptance](next-development-spec.md#fixed-experience-acceptance).
+The U0 implementation on branch `feat/autonomous-understanding-20261116` passed the local checks below on 2026-11-16, using an isolated temporary data directory without provider calls. Implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). The 115 tests / 72 subtests and CI in the historical PR #15 section belong to that older baseline, including its old profile policy, and remain separate. Broad stable/change/context reasoning, a minimal host, real provider, and natural-conversation experience remain open. See [positioning](positioning.md) and [U01–U08 acceptance](next-development-spec.md#fixed-experience-acceptance).
 
 ### Current revision local validation
 
@@ -104,7 +104,7 @@ These results apply to this slice’s code and reproducible tests; remote Checks
 
 | Priority | Work | Acceptance / gap |
 | --- | --- | --- |
-| P0 / U0 | Publish the locally completed automatic-understanding slice | 157 tests / 101 subtests, 157 unittest tests, 11 suites, replay PASS; remote publication and Checks pending. |
+| P0 / U0 | Automatic-understanding implementation and validation | 157 tests / 101 subtests, 157 unittest tests, 11 suites, replay PASS; implementation and hosted Checks: [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). |
 | Next / S1-a + S0-c | Minimal host delivery and temporary context | Capture actual model-call inputs across turns; current exceptions do not overwrite lasting preferences. |
 | P1 / Experience | First project-task continuation with natural adaptation | User corrections change the next answer; the assistant avoids irrelevant recall and repetitive “I remember” messages. |
 | P2 / S2–S4 | Lasting understanding and a real provider | Stable/change/context cases, longitudinal user feedback, helpfulness, correction effort, latency, and cost. Rules or payload validation alone are insufficient. |

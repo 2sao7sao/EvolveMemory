@@ -86,7 +86,7 @@ python -m unittest discover -s tests -p 'test_*.py'
 python -m evals.runner --suite all
 ```
 
-The merged [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) baseline passed 115 local tests (72 pytest subtests), all 11 deterministic suites, the standalone replay, and [hosted CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401). Those results cover the earlier controls/scope implementation, including its now-superseded profile-confirmation rule. **This revision passed 157 local tests (101 pytest subtests), all 11 deterministic suites, and replay PASS**, using an isolated temporary data directory and no provider. The implementation branch `feat/autonomous-understanding-20261116` awaits remote publication and Checks. These checks complete the local U0 slice, not experience acceptance U01–U08, a complete host, or real-model helpfulness. See [maintenance evidence](docs/maintenance.md).
+The merged [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) baseline passed 115 local tests (72 pytest subtests), all 11 deterministic suites, the standalone replay, and [hosted CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401). Those results cover the earlier controls/scope implementation, including its now-superseded profile-confirmation rule. **This revision passed 157 local tests (101 pytest subtests), all 11 deterministic suites, and replay PASS**, using an isolated temporary data directory and no provider. Implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). These checks complete the local U0 slice, not experience acceptance U01–U08, a complete host, or real-model helpfulness. See [maintenance evidence](docs/maintenance.md).
 
 ## Status and roadmap
 

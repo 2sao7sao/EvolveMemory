@@ -27,7 +27,7 @@ The intended experience is an attentive collaborator and companion: it remembers
 | Level | What is supported |
 | --- | --- |
 | Merged foundation | PR #15 provides normalized v2 storage, shared read/write controls, scope persistence, event opt-in, source checks, and lifecycle regressions. Its confirmed-only profile rule is historical and is replaced in this locally validated revision. |
-| Current U0 implementation | Evidence-backed automatic profile accumulation and adaptation retain source identity, settings, correction, and scope checks. Local validation: 157 tests / 101 pytest subtests, 157 unittest tests, 11 deterministic suites, replay PASS; no provider. Branch `feat/autonomous-understanding-20261116` awaits remote publication and Checks. |
+| Current U0 implementation | Evidence-backed automatic profile accumulation and adaptation retain source identity, settings, correction, and scope checks. Local validation: 157 tests / 101 pytest subtests, 157 unittest tests, 11 deterministic suites, replay PASS; no provider. Implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). |
 | Present mechanism | Rules and caller-supplied `llm_payload` proposals. A payload accepted by the API is not an integrated model provider. |
 | Still missing | A complete multi-turn host, broad stable/change/context reasoning, real-provider evidence, long-term natural-conversation evaluation, and production deployment guarantees. |
 

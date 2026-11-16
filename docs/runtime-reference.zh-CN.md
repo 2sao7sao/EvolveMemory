@@ -8,7 +8,7 @@
 
 用户在 2026-11-16 后续明确取代了“所有个人画像先确认才适配”的旧选择。当前方向是：AI 从独立证据中自主形成并持续修正对人的理解；普通偏好证据充分时可自动入库，并在相关对话中自然适配，不逐项索取画像确认。弱证据暂存为假设或不使用，不默认转成提问。长期协作与陪伴是愿景，项目任务是首个验证场景。
 
-本修订 U0 的规则/API 切片本地通过：**pytest 157 tests + 101 subtests**、**unittest 157 tests**、**11/11 确定性套件**（`failures=[]`）及 **replay PASS**，使用独立临时数据目录，未调用 provider。分支 `feat/autonomous-understanding-20261116` 尚待远端发布和 Checks，未声称已经合入 main；PR #15 历史证据单独保留。目前仍由规则和外部 `llm_payload` 提供候选；尚未证明真实 provider 或完整多轮宿主的自然体验。
+本修订 U0 的规则/API 切片本地通过：**pytest 157 tests + 101 subtests**、**unittest 157 tests**、**11/11 确定性套件**（`failures=[]`）及 **replay PASS**，使用独立临时数据目录，未调用 provider。实现与远端 Checks 见 [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16)；PR #15 历史证据单独保留。目前仍由规则和外部 `llm_payload` 提供候选；尚未证明真实 provider 或完整多轮宿主的自然体验。
 
 | 方面 | 修正后的契约 |
 | --- | --- |

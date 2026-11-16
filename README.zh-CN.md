@@ -85,7 +85,7 @@ python -m unittest discover -s tests -p 'test_*.py'
 python -m evals.runner --suite all
 ```
 
-已合并的 [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) 基线通过 115 个本地测试（另有 72 个 pytest subtest）、11 个确定性评估套件、独立 replay 和[远端 CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401)。这些结果属于此前控制/scope 切片，包含如今被取代的画像确认规则。**本轮通过 157 个本地测试（另有 101 个 pytest subtest）、11 个确定性套件与 replay PASS**，使用独立临时数据目录，未调用 provider。实现分支 `feat/autonomous-understanding-20261116` 尚待远端发布与 Checks。U0 本地切片完成不等于 U01–U08 实际体验、完整宿主或真实模型效果已验收，详见[维护证据](docs/maintenance.md)。
+已合并的 [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) 基线通过 115 个本地测试（另有 72 个 pytest subtest）、11 个确定性评估套件、独立 replay 和[远端 CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401)。这些结果属于此前控制/scope 切片，包含如今被取代的画像确认规则。**本轮通过 157 个本地测试（另有 101 个 pytest subtest）、11 个确定性套件与 replay PASS**，使用独立临时数据目录，未调用 provider。实现与远端 Checks 见 [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16)。U0 本地切片完成不等于 U01–U08 实际体验、完整宿主或真实模型效果已验收，详见[维护证据](docs/maintenance.md)。
 
 ## 状态与路线
 
