@@ -499,7 +499,7 @@ F03 的实际 review marker、F04 的事件级开启、F06 的宿主范围与 H0
 
 ### 13.1 已合并的定向修复
 
-`c628f00` 曾存在两项已复现问题：`memory_enabled=false` 后 v2 query/prompt-context 仍可编译旧偏好；迁移测试固定使用 2026-04-16 事件却未固定当前时钟，事件过期后导致断言失败。它们已由 [PR #13](https://github.com/2sao7sao/EvolveMemory/pull/13) 的 [`be9cfb0`](https://github.com/2sao7sao/EvolveMemory/commit/be9cfb08cfbc53007648d381ec315ee4bea3b3d7) 修复，并进入当前对齐的 `main@3aa4285`：
+`c628f00` 曾存在两项已复现问题：`memory_enabled=false` 后 v2 query/prompt-context 仍可编译旧偏好；迁移测试固定使用 2026-04-16 事件却未固定当前时钟，事件过期后导致断言失败。它们已由 [PR #13](https://github.com/2sao7sao/EvolveMemory/pull/13) 的 [`be9cfb0`](https://github.com/2sao7sao/EvolveMemory/commit/be9cfb08cfbc53007648d381ec315ee4bea3b3d7) 修复，并进入当时的 `main@3aa4285`：
 
 - `app.py` 的 `v2_memory_query` / `v2_prompt_context` 在加载正常记忆前检查主开关，关闭时使用空的非持久运行时，阻止 normalized 与 legacy fallback 回填。
 - `NormalizedSQLiteMemoryRepository.migrate_store` 接受可选 `now`；测试固定时钟，并另验过期事件被排除、长期偏好保留。
