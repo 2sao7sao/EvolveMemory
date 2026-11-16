@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from .models import AllowedUse, Authority, MemoryLayer, MemoryRecord, Sensitivity
+from .settings import PROFILE_POLICY_VERSION
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,10 @@ class ProfileHypothesis:
     rationale: str
     counter_evidence_ids: list[UUID] = field(default_factory=list)
     supporting_quotes: list[str] = field(default_factory=list)
+    source_turn_ids: list[str] = field(default_factory=list)
+    source_memory_ids: list[UUID] = field(default_factory=list)
+    source_user_id: str | None = None
+    autonomous_qualified: bool = False
 
     def to_record(
         self,
@@ -83,6 +88,8 @@ class ProfileHypothesis:
         session_id: str | None,
         observed_at: datetime,
     ) -> MemoryRecord:
+        if self.source_user_id is not None and self.source_user_id != user_id:
+            raise ValueError("profile evidence belongs to a different user")
         return MemoryRecord(
             user_id=user_id,
             session_id=session_id,
@@ -92,6 +99,7 @@ class ProfileHypothesis:
             normalized_value=self.value,
             confidence=self.confidence,
             authority=Authority.ASSISTANT_INFERRED,
+            source_turn_ids=list(self.source_turn_ids),
             sensitivity=(
                 Sensitivity.SENSITIVE
                 if self.dimension == "emotional_support_need"
@@ -111,7 +119,8 @@ class ProfileHypothesis:
                 "counter_evidence_ids": [str(item) for item in self.counter_evidence_ids],
                 "rationale": self.rationale,
                 "supporting_quotes": list(self.supporting_quotes),
-                "profile_version": "evidence-accumulator-v1",
+                "source_memory_ids": [str(item) for item in self.source_memory_ids],
+                "profile_version": "evidence-accumulator-v2",
             },
         )
 
@@ -210,49 +219,76 @@ class ProfileEvidenceExtractor:
 
 
 class ProfileAccumulator:
-    def __init__(self, min_evidence_count: int = 2, min_support_weight: float = 1.2) -> None:
-        self.min_evidence_count = min_evidence_count
+    """Bounded evidence heuristic, not a claim of validated psychological understanding.
+
+    Eight recent distinct turns and a 30-day half-life prevent an unlimited pile
+    of old observations from permanently outweighing new behavior. Both values
+    are engineering defaults that need evaluation against longitudinal dialogue.
+    """
+
+    def __init__(
+        self, min_evidence_count: int = 2, min_support_weight: float = 1.2,
+        *, recent_turn_window: int = 8, half_life_days: float = 30.0,
+    ) -> None:
+        self.min_evidence_count = max(2, min_evidence_count)
         self.min_support_weight = min_support_weight
+        self.recent_turn_window = max(self.min_evidence_count, recent_turn_window)
+        self.half_life_days = max(1.0, half_life_days)
 
-    def accumulate(self, evidence: list[ProfileEvidence]) -> list[ProfileHypothesis]:
-        grouped: dict[tuple[str, str], list[ProfileEvidence]] = {}
-        current_at = max((item.observed_at for item in evidence), default=None)
+    def accumulate(
+        self, evidence: list[ProfileEvidence], *, now: datetime | None = None,
+    ) -> list[ProfileHypothesis]:
+        current_at = now or max((item.observed_at for item in evidence), default=None)
+        # Replayed evidence, multiple records from one utterance, and legacy
+        # entries without a real turn id must not become independent observations.
+        unique: dict[tuple[str, str, str, str, str], ProfileEvidence] = {}
         for item in evidence:
-            grouped.setdefault((item.dimension, item.value), []).append(item)
-
-        hypotheses: list[ProfileHypothesis] = []
-        for (dimension, value), items in grouped.items():
-            support_items = [item for item in items if item.polarity == "support"]
-            counter_items = [item for item in items if item.polarity == "counter"]
-            support_weight = sum(
-                self._decayed_weight(item, current_at) for item in support_items
-            )
-            counter_weight = sum(
-                self._decayed_weight(item, current_at) for item in counter_items
-            )
-            net_weight = support_weight - counter_weight
-            if len(support_items) < self.min_evidence_count or net_weight < self.min_support_weight:
+            if not item.source_turn_id or (current_at is not None and item.observed_at > current_at):
                 continue
-            confidence = min(0.93, 0.45 + net_weight / 2.4)
-            hypotheses.append(
-                ProfileHypothesis(
-                    dimension=dimension,
-                    value=value,
-                    confidence=confidence,
-                    evidence_count=len(support_items),
-                    support_weight=support_weight,
-                    counter_weight=counter_weight,
-                    evidence_ids=[item.id for item in support_items],
+            identity = (item.user_id, item.dimension, item.value, item.polarity, item.source_turn_id)
+            previous = unique.get(identity)
+            if previous is None or self._decayed_weight(item, current_at) > self._decayed_weight(previous, current_at):
+                unique[identity] = item
+        dimensions: dict[tuple[str, str], list[ProfileEvidence]] = {}
+        for item in unique.values():
+            dimensions.setdefault((item.user_id, item.dimension), []).append(item)
+        hypotheses: list[ProfileHypothesis] = []
+        for (user_id, dimension), all_items in dimensions.items():
+            turn_times: dict[str, datetime] = {}
+            for item in all_items:
+                turn_id = str(item.source_turn_id)
+                turn_times[turn_id] = max(turn_times.get(turn_id, item.observed_at), item.observed_at)
+            recent_turns = set(sorted(turn_times, key=lambda turn: (turn_times[turn], turn), reverse=True)
+                               [:self.recent_turn_window])
+            recent_items = [item for item in all_items if item.source_turn_id in recent_turns]
+            alternatives: list[tuple[float, ProfileHypothesis]] = []
+            for value in sorted({item.value for item in recent_items}):
+                items = [item for item in recent_items if item.value == value]
+                support_items = sorted((item for item in items if item.polarity == "support"),
+                                       key=lambda item: item.observed_at, reverse=True)
+                counter_items = [item for item in items if item.polarity == "counter"]
+                support_weight = sum(self._decayed_weight(item, current_at) for item in support_items)
+                counter_weight = sum(self._decayed_weight(item, current_at) for item in counter_items)
+                net_weight = support_weight - counter_weight
+                if len(support_items) < self.min_evidence_count or net_weight < self.min_support_weight:
+                    continue
+                hypothesis = ProfileHypothesis(
+                    dimension=dimension, value=value,
+                    confidence=min(0.93, 0.45 + net_weight / 2.4),
+                    evidence_count=len(support_items), support_weight=support_weight,
+                    counter_weight=counter_weight, evidence_ids=[item.id for item in support_items],
                     counter_evidence_ids=[item.id for item in counter_items],
-                    rationale=self._rationale(
-                        dimension=dimension,
-                        value=value,
-                        support_items=support_items,
-                        counter_items=counter_items,
-                    ),
+                    rationale=self._rationale(dimension=dimension, value=value,
+                                              support_items=support_items, counter_items=counter_items),
                     supporting_quotes=[item.quote for item in support_items[:5]],
+                    source_turn_ids=sorted({str(item.source_turn_id) for item in support_items}),
+                    source_memory_ids=sorted({item.source_memory_id for item in support_items + counter_items}, key=str),
+                    source_user_id=user_id, autonomous_qualified=True,
                 )
-            )
+                alternatives.append((net_weight, hypothesis))
+            alternatives.sort(key=lambda entry: entry[0], reverse=True)
+            if alternatives and (len(alternatives) == 1 or alternatives[0][0] - alternatives[1][0] >= 0.15):
+                hypotheses.append(alternatives[0][1])
         return sorted(hypotheses, key=lambda item: item.confidence, reverse=True)
 
     def _rationale(
@@ -283,6 +319,40 @@ class ProfileAccumulator:
         if current_at is None:
             decay = 1.0
         else:
-            age_days = max((current_at - item.observed_at).days, 0)
-            decay = max(0.25, 1.0 - age_days / 365)
+            age_days = max((current_at - item.observed_at).total_seconds() / 86400, 0)
+            decay = 0.5 ** (age_days / self.half_life_days)
         return item.weight * item.confidence * decay
+
+
+def has_autonomous_profile_qualification(record: MemoryRecord) -> bool:
+    """Read a server-issued marker; write authorization must use trusted context.
+
+    The HTTP entry point must also re-evaluate live source evidence on reads.
+    A metadata marker supplied with an external proposal is never write authority.
+    """
+    qualification = record.metadata.get("profile_qualification")
+    return (
+        isinstance(qualification, dict)
+        and qualification.get("policy_version") == PROFILE_POLICY_VERSION
+        and qualification.get("method") == "scoped_turn_evidence"
+        and isinstance(qualification.get("distinct_turn_count"), int)
+        and qualification["distinct_turn_count"] >= 2
+        and len(set(record.source_turn_ids)) >= 2
+        and bool(record.metadata.get("source_memory_ids"))
+    )
+
+
+def is_user_corrected_profile(record: MemoryRecord) -> bool:
+    """Recognize a persisted explicit correction, independently of old inference.
+
+    New proposals must have correction markers removed at the write boundary;
+    only the repository correction path issues this marker and lineage.
+    """
+    return (
+        record.layer == MemoryLayer.INFERRED_PROFILE
+        and record.authority == Authority.USER_EXPLICIT
+        and record.metadata.get("correction") is True
+        and record.metadata.get("correction_origin") == "user_memory_correction"
+        and record.supersedes is not None
+        and record.metadata.get("corrected_from") == str(record.supersedes)
+    )

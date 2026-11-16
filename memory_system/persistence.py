@@ -21,6 +21,7 @@ from .models import (
     MemoryStatus,
 )
 from .profiles import ProfileEvidence
+from .models import MemoryLayer
 from .schema import MemoryAuditEvent, MemoryItem
 from .settings import UserMemorySettings
 
@@ -369,12 +370,21 @@ class NormalizedSQLiteMemoryRepository:
                 self.record_operation_audit(operation, memory_id=None, created_at=timestamp)
                 return []
             candidate = operation.candidate
-            existing.confidence = max(existing.confidence, candidate.confidence)
+            # A recomputed profile is a new estimate, not another vote for the
+            # historical maximum. Keep its live evidence and uncertainty fresh.
+            if candidate.layer == MemoryLayer.INFERRED_PROFILE:
+                existing.confidence = candidate.confidence
+                existing.metadata = dict(candidate.metadata)
+                existing.observed_at = candidate.observed_at
+                existing.valid_to = candidate.valid_to
+            else:
+                existing.confidence = max(existing.confidence, candidate.confidence)
             existing.source_turn_ids = sorted(
                 set(existing.source_turn_ids + candidate.source_turn_ids)
             )
             existing.tags = sorted(set(existing.tags + candidate.tags))
-            existing.metadata["evidence_count"] = int(existing.metadata.get("evidence_count", 1)) + 1
+            if candidate.layer != MemoryLayer.INFERRED_PROFILE:
+                existing.metadata["evidence_count"] = int(existing.metadata.get("evidence_count", 1)) + 1
             self.upsert_record(existing)
             self.add_evidence_for_record(
                 candidate,
@@ -811,6 +821,20 @@ class NormalizedSQLiteMemoryRepository:
             "correction": True,
             "corrected_from": str(existing.id),
         }
+        if corrected.layer == MemoryLayer.INFERRED_PROFILE:
+            # The user's correction is a new source of authority. Its value must
+            # not depend on the old (now disputed) inference's evidence or approval.
+            # The superseded record and correction audit retain that history.
+            corrected.evidence_ids = []
+            corrected.source_turn_ids = [f"user_correction:{corrected.id}"]
+            corrected.tags = [tag for tag in corrected.tags if tag != "evidence_accumulated"]
+            corrected.tags = sorted(set(corrected.tags) | {"user_corrected_profile"})
+            corrected.metadata = {
+                "evidence": evidence,
+                "correction": True,
+                "correction_origin": "user_memory_correction",
+                "corrected_from": str(existing.id),
+            }
         existing.status = MemoryStatus.SUPERSEDED
         existing.superseded_by = corrected.id
         self.upsert_record(existing)

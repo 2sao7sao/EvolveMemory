@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from uuid import UUID
 
 from .models import (
     Authority,
@@ -10,7 +11,7 @@ from .models import (
     MemoryRecord,
     Sensitivity,
 )
-from .settings import UserMemorySettings
+from .settings import PROFILE_POLICY_VERSION, UserMemorySettings
 
 
 AUTHORITY_RANK = {
@@ -29,6 +30,9 @@ class WritePolicyContext:
     settings: UserMemorySettings = field(default_factory=UserMemorySettings)
     scope: str | None = None
     is_negative_preference: bool = False
+    # Populated only by the server after accumulating authorized live evidence.
+    # Never deserialize these ids from an extractor proposal or HTTP request.
+    qualified_profile_ids: frozenset[UUID] = field(default_factory=frozenset)
 
 
 @dataclass(frozen=True)
@@ -149,6 +153,17 @@ class WeightedMemoryWriteEvaluatorV2:
                 factors,
             )
         if (
+            candidate.scope == "global" and not context.settings.allow_global_memory
+        ) or (
+            candidate.scope in {"project", "domain"}
+            and candidate.project_id is not None
+            and candidate.project_id not in context.settings.enabled_project_ids
+        ):
+            return self._operation(
+                MemoryOperationType.REJECT, candidate, score,
+                "memory scope disabled by user settings", factors,
+            )
+        if (
             candidate.sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
             and not context.settings.allow_sensitive_memory
         ):
@@ -175,6 +190,36 @@ class WeightedMemoryWriteEvaluatorV2:
                 "negative preference stored as suppression rule",
                 factors,
             )
+        if candidate.layer == MemoryLayer.INFERRED_PROFILE:
+            candidate = candidate.model_copy(deep=True)
+            # Fresh proposals cannot inherit trust from payload metadata. Manual
+            # approvals are issued by the repository's review resolution path.
+            candidate.metadata.pop("profile_qualification", None)
+            candidate.metadata.pop("user_review_approved", None)
+            candidate.metadata.pop("correction", None)
+            candidate.metadata.pop("correction_origin", None)
+            candidate.metadata.pop("corrected_from", None)
+            distinct_turns = len(set(candidate.source_turn_ids))
+            qualified = (
+                candidate.id in context.qualified_profile_ids
+                and distinct_turns >= 2
+                and len(set(candidate.metadata.get("evidence_ids", []))) >= 2
+                and bool(candidate.metadata.get("source_memory_ids"))
+            )
+            if qualified:
+                candidate.metadata["profile_qualification"] = {
+                    "policy_version": PROFILE_POLICY_VERSION,
+                    "method": "scoped_turn_evidence",
+                    "distinct_turn_count": distinct_turns,
+                }
+            elif candidate.layer not in context.settings.review_required_for_layers:
+                return self._operation(
+                    MemoryOperationType.EPHEMERAL_ONLY,
+                    candidate,
+                    score,
+                    "profile lacks qualified multi-turn evidence; retain observations without requesting review",
+                    factors,
+                )
         # Preserve the intended replacement while waiting for review. Detecting
         # a conflict here does not authorize applying it before the policy gates.
         contradiction = ContradictionDetector().detect(candidate, existing_records)
@@ -230,10 +275,7 @@ class WeightedMemoryWriteEvaluatorV2:
                 target_memory_id=review_target,
                 requires_user_review=True,
             )
-        if not reviewed and (
-            candidate.layer == MemoryLayer.INFERRED_PROFILE
-            or candidate.layer in context.settings.review_required_for_layers
-        ):
+        if not reviewed and candidate.layer in context.settings.review_required_for_layers:
             return self._operation(
                 MemoryOperationType.ASK_USER_CONFIRMATION,
                 candidate,
@@ -244,6 +286,15 @@ class WeightedMemoryWriteEvaluatorV2:
                 requires_user_review=True,
             )
         if contradiction is not None:
+            if (
+                candidate.layer == MemoryLayer.INFERRED_PROFILE
+                and AUTHORITY_RANK[candidate.authority] < AUTHORITY_RANK[contradiction.existing.authority]
+            ):
+                return self._operation(
+                    MemoryOperationType.EPHEMERAL_ONLY, candidate, score,
+                    "qualified inference does not override an explicit user correction",
+                    factors, target_memory_id=contradiction.existing.id,
+                )
             return self._resolve_contradiction(candidate, contradiction, score, factors)
         return self._operation(
             MemoryOperationType.CREATE,

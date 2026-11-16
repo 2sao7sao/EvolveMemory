@@ -5,6 +5,8 @@ from typing import Any
 
 from .models import MemoryLayer, Sensitivity
 
+PROFILE_POLICY_VERSION = "autonomous-v1"
+
 
 @dataclass(frozen=True)
 class GatePolicyConfig:
@@ -30,9 +32,11 @@ class UserMemorySettings:
     review_required_for_sensitivity: list[Sensitivity] = field(
         default_factory=lambda: [Sensitivity.SENSITIVE, Sensitivity.RESTRICTED]
     )
-    review_required_for_layers: list[MemoryLayer] = field(
-        default_factory=lambda: [MemoryLayer.INFERRED_PROFILE]
-    )
+    review_required_for_layers: list[MemoryLayer] = field(default_factory=list)
+    profile_policy_version: str = PROFILE_POLICY_VERSION
+    review_required_for_layers_explicit: bool = False
+    legacy_review_required_for_layers: list[MemoryLayer] = field(default_factory=list)
+    review_policy_migration: str | None = None
 
     def allows_key(self, key: str) -> bool:
         return self.memory_enabled and key not in self.disabled_keys
@@ -59,11 +63,32 @@ class UserMemorySettings:
             "review_required_for_layers": [
                 item.value for item in self.review_required_for_layers
             ],
+            "profile_policy_version": self.profile_policy_version,
+            "review_required_for_layers_explicit": self.review_required_for_layers_explicit,
+            "legacy_review_required_for_layers": [
+                item.value for item in self.legacy_review_required_for_layers
+            ],
+            "review_policy_migration": self.review_policy_migration,
         }
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "UserMemorySettings":
         defaults = cls()
+        layers = [MemoryLayer(item) for item in payload.get("review_required_for_layers", [])]
+        explicit = bool(payload.get("review_required_for_layers_explicit", False))
+        legacy_layers = [MemoryLayer(item) for item in payload.get("legacy_review_required_for_layers", [])]
+        migration = payload.get("review_policy_migration")
+        if "profile_policy_version" not in payload and "review_required_for_layers" in payload:
+            if not explicit and layers == [MemoryLayer.INFERRED_PROFILE]:
+                # Historical settings did not record whether this exact old
+                # default was explicitly chosen. The authorized policy change
+                # replaces it while preserving the ambiguous old value for audit.
+                legacy_layers = list(layers)
+                layers = []
+                migration = "legacy_default_replaced_origin_unknown"
+            elif not explicit:
+                explicit = True
+                migration = "legacy_custom_review_preserved"
         return cls(
             memory_enabled=bool(payload.get("memory_enabled", defaults.memory_enabled)),
             enabled_project_ids=list(payload.get("enabled_project_ids", [])),
@@ -98,11 +123,9 @@ class UserMemorySettings:
                     ],
                 )
             ],
-            review_required_for_layers=[
-                MemoryLayer(item)
-                for item in payload.get(
-                    "review_required_for_layers",
-                    [layer.value for layer in defaults.review_required_for_layers],
-                )
-            ],
+            review_required_for_layers=layers,
+            profile_policy_version=PROFILE_POLICY_VERSION,
+            review_required_for_layers_explicit=explicit,
+            legacy_review_required_for_layers=legacy_layers,
+            review_policy_migration=migration,
         )

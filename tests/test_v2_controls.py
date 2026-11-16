@@ -142,7 +142,8 @@ class V2ControlsTest(unittest.TestCase):
         self.assertEqual(self.query()["candidates"], [])
         self.assertEqual(self.prompt()["memory_context"]["style_policy"], [])
 
-    def test_profile_requires_approval_and_settings_still_override_approval(self):
+    def test_opt_in_profile_review_and_settings_still_override_approval(self):
+        self.settings(review_required_for_layers=["inferred_profile"])
         self.ingest("回答直接一点。")
         self.ingest("再提醒一下，回答直接一点。")
         repository = api.build_normalized_repository()
@@ -171,9 +172,7 @@ class V2ControlsTest(unittest.TestCase):
         first = self.ingest("回答直接一点。")
         self.ingest("再提醒一下，回答直接一点。")
         repository = api.build_normalized_repository()
-        pending = repository.list_review_items(user_id="alice")[0]
-        approved = self.client.post(self.root + f"/memory/review-queue/{pending['id']}/resolve", json={"approve": True, "timestamp": NOW})
-        self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertEqual(repository.list_review_items(user_id="alice"), [])
         self.assertIn("directness_preference_level", str(self.query()))
         source = repository.get_record(first["persisted_records"][0]["id"])
         source.valid_to = datetime.fromisoformat(NOW) - timedelta(seconds=1)

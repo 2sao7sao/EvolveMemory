@@ -4,7 +4,32 @@ Review date: **2026-11-16**. Original maintenance baseline: [`c628f00`](https://
 
 ## Recommendation
 
-**Continue maintenance.** The user has selected project-task continuation and confirmed same-project authorized reuse, confirmed-only personal-profile adaptation, per-event opt-in follow-ups, and conditional source hints. The immediate milestone is consistent controls and scope, followed by a bounded host-delivery path. A full conversation or production claim is not supported.
+**Continue development toward evolving understanding.** On 2026-11-16 the user explicitly replaced the earlier confirmed-only profile decision. AI should infer and revise understanding over time, distinguish stable preferences from change and context, and adapt naturally without repeated confirmation or old-memory recitals. Project-task continuation is the first scenario; long-term collaboration and companionship are the vision.
+
+Same-project authorized reuse, source/scope/opt-out boundaries, per-event follow-up enablement, and conditional source hints remain. The current implementation uses rules and external `llm_payload`; it does not yet establish real-provider understanding or a complete multi-turn experience.
+
+## Current automatic-understanding revision — local U0 checks passed
+
+This revision replaces PR #15's universal profile review-marker requirement with evidence-backed automatic accumulation and relevant, natural adaptation. Multiple independent, available source turns are required; weak evidence stays tentative or unused rather than triggering default confirmation. Explicit corrections and counter-evidence should revise earlier inferences, and settings/source checks remain effective.
+
+Implemented candidate details: server-granted `autonomous-v1` qualification from live scoped evidence; at least 2 real source turns, net support ≥1.2, recent 8 turns per dimension, and 30-day half-life with no permanent floor. Reads recompute live qualification. Optional ingest `turn_id` supports host-managed retry identity; omission is not idempotent. Review defaults migrate with an audit record because old same-value manual/default settings cannot be distinguished. Finite current-turn overrides and natural-style prompt guidance exist, but broad contextual understanding and response-history repetition control are not established. See the [runtime contract](runtime-reference.md#candidate-implementation-details-and-limits).
+
+Direct profile `/correct` now records new user-provided evidence for the correction; old inference sources remain on the old version/audit rather than filtering the corrected value through the old pool. It does not fabricate a review-approval marker.
+
+The U0 implementation on branch `feat/autonomous-understanding-20261116` passed the local checks below on 2026-11-16, using an isolated temporary data directory without provider calls. Remote publication and Checks are pending; this is not a claim that the new revision is merged to main. The 115 tests / 72 subtests and CI in the historical PR #15 section belong to that older baseline, including its old profile policy, and remain separate. Broad stable/change/context reasoning, a minimal host, real provider, and natural-conversation experience remain open. See [positioning](positioning.md) and [U01–U08 acceptance](next-development-spec.md#fixed-experience-acceptance).
+
+### Current revision local validation
+
+| Command | Result | Evidence boundary |
+| --- | --- | --- |
+| `python3 -m pytest -q --tb=short` | **157 passed, 101 subtests passed** | Local rule, persistence, and HTTP TestClient regressions; subtests are not additional test methods. |
+| `python3 -m unittest discover -s tests -p 'test_*.py'` | **157 passed** | Same suite using the CI-style runner. |
+| `python3 -m evals.runner --suite all` | **11/11 suites**, `failures=[]` | Deterministic evaluation with no provider. |
+| `python3 examples/replay_adaptive_memory.py` | **PASS** | Standalone synthetic replay, not a real-model or complete host conversation. |
+
+Raw evidence is in the maintenance workspace `reports/EvolveMemory-understanding-validation/`: `summary.json`, `pytest.log`, `unittest.log`, `evals.log`, and `replay.log`. This is an external workspace record, not a repository-hosted artifact. The implementation PR link and remote Checks will identify the published revision.
+
+**U0 is locally complete; U01–U08 actual-experience acceptance is not.** The next delivery step is **S1-a minimal host plus temporary context / S0-c**. Captured model-call input, final-response behavior, and longitudinal user feedback must be verified separately; a passing rule test or natural-style prompt instruction does not prove those layers.
 
 ## Original GitHub snapshot before PR #13
 
@@ -43,17 +68,17 @@ The HTTP regressions use FastAPI TestClient. They first verify that default-enab
 
 The maintenance PR CI passed on 2026-11-16 at `68d12e2`: [hosted CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43888749021). This does not rerun or approve the separate draft PR #12.
 
-## Current controls/scope slice — local checks passed
+## Historical PR #15 controls/scope slice — merged
 
-The following implementation passed the local checks below. Independent local review found no blocker within this slice. None of PR #13's earlier counts are reused as this slice's validation; hosted CI must be read from the associated implementation PR.
+The following implementation passed the local checks below and [hosted CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401), then merged as [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) at `8e3ab17`. Independent local review found no blocker within that slice. Its confirmed-only profile policy is superseded by the new user direction; other controls remain the foundation. None of these counts validate the new revision.
 
 | Area | Implemented behavior | Local evidence and boundary |
 | --- | --- | --- |
 | v2 storage | Normalized-only reads/writes; no implicit legacy session fallback or dual-write. Existing `/sessions` data remains and can be explicitly migrated with `migrate_store`. | Isolation plus existing explicit-migration tests; no claims of v2 governance on the old session API. |
-| Shared read controls | Both v2 context endpoints use `prepare_v2_query` and `apply_read_controls` before scoring/debug output. Keys, layers, sensitivity, and unconfirmed profiles are filtered. | Query/prompt pairs and excluded-content assertions in `tests/test_v2_controls.py`. |
+| Shared read controls | Both v2 context endpoints use `prepare_v2_query` and `apply_read_controls` before scoring/debug output. Keys, layers, sensitivity, and profiles without the then-required confirmation are filtered. The universal confirmation requirement is historical. | Query/prompt pairs and excluded-content assertions in `tests/test_v2_controls.py`. |
 | Scope persistence and selection | Ingest adds `project_id`, `domain`, `memory_scope`; query adds `project_id`, `domain`. Session/project values match exactly, including `None` as unbound. | Save/reload/adapter, same-project record reuse, cross-project exclusion, and no omitted-identifier expansion cases. |
 | Explicit sharing | `enabled_project_ids=[]` and `allow_global_memory=false` by default. Project/global reads and writes require enablement; language can narrow temporary scope only. | Disabled/enabled pairs, revocation, and temporary-language tests. |
-| Profile and temporary-write controls | Profiles need an actual review marker; temporary instructions, `auto_write=false`, and master-off do not derive profile evidence. | Marker, disabled/expired source, and no-derived-write cases. |
+| Profile and temporary-write controls | As merged in PR #15, profiles required a review marker; this requirement is now superseded. Temporary instructions, `auto_write=false`, and master-off still must not derive profile evidence. | Marker, disabled/expired source, and no-derived-write cases. |
 | Event follow-up | `PUT /v2/users/{user_id}/memory/events/{memory_id}/followup` with `{enabled}` controls one event, off by default and constrained by global settings. | Per-event/global/scope control cases; no user-delivery receipt or concurrent quota proof. |
 | Review and lifecycle | Approval rechecks current target/source state, scope, settings, and time; withdrawal returns 409/pending. Correction is ACTIVE-only; delete/forget-all cancel related pending reviews. | Inactive/missing targets, deleted/expired sources, scope opt-out, and pending-cancellation cases. |
 | Evidence identity and schema | Profile evidence uses real record IDs plus source_turn_id deduplication. Existing rows survive old-schema migrations. | Record/evidence schema preservation, repeat migration, distinct-turn, and duplicate-source cases in `tests/test_scope_persistence.py`. |
@@ -77,15 +102,14 @@ These results apply to this slice’s code and reproducible tests; remote Checks
 
 ## Next milestones
 
-| Priority | Work | Acceptance / blocker |
+| Priority | Work | Acceptance / gap |
 | --- | --- | --- |
-| P0 | Keep the controls/scope slice and its regressions passing | Local checks pass; remote Checks must verify the associated implementation revision. |
-| P1 | Update PR #12 to the confirmed product choices and current baseline | Keep protocol requirements, implemented candidate behavior, and validation results separate. |
-| P1 | Add the minimal host and capture actual delivery input | A deterministic callable receives only permitted context; compiling a prompt alone is not delivery or a real-model result. |
-| P1 | Complete the bounded project-task conversation slice | Recover old decisions with sources, apply current-turn overrides, and handle stale events through one host interface. |
-| P2 | Restore Pages configuration | Read the failing job logs and repository Pages configuration; verify a successful deployment before advertising a live product page. |
-| P2 | Replace the hash embedding substitute and connect an extraction provider | Version the dataset and provider; measure quality, latency, cost, and failures. Avoid presenting seeded replay scores as real-model gains. |
-| P2 | Build governance UI and production controls | Authentication, tenant isolation, encryption, retention and deployment checks remain unverified. |
+| P0 / U0 | Publish the locally completed automatic-understanding slice | 157 tests / 101 subtests, 157 unittest tests, 11 suites, replay PASS; remote publication and Checks pending. |
+| Next / S1-a + S0-c | Minimal host delivery and temporary context | Capture actual model-call inputs across turns; current exceptions do not overwrite lasting preferences. |
+| P1 / Experience | First project-task continuation with natural adaptation | User corrections change the next answer; the assistant avoids irrelevant recall and repetitive “I remember” messages. |
+| P2 / S2–S4 | Lasting understanding and a real provider | Stable/change/context cases, longitudinal user feedback, helpfulness, correction effort, latency, and cost. Rules or payload validation alone are insufficient. |
+| P2 | Complete lifecycle and deployment work | Full dependency invalidation, concurrent revocation, source-history coverage, event receipts, authentication, and production controls. |
+| P2 | Restore Pages configuration | Verify a successful deployment and live URL before advertising a hosted product page. |
 
 ## README and asset use
 

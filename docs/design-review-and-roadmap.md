@@ -2,6 +2,8 @@
 
 Date: 2026-05-05
 
+Historical review. The 2026-11-16 user correction supersedes any confirmed-only interpretation: AI should autonomously infer and revise understanding, then adapt naturally within existing controls. Weak evidence is not a reason for routine confirmation prompts. See [positioning](positioning.md), [the current plan](next-development-spec.md), and [maintenance evidence](maintenance.md) for current scope; historical “now” and module statuses below refer to the original review.
+
 This document reviews the current system against the original product idea:
 
 ```text
@@ -136,8 +138,10 @@ be a general mechanism. Next skills should be:
 ### P2: Profile Inference Needs Richer Psychology And Explanation
 
 The system now has the first profile evidence ledger and accumulator. Repeated
-signals can produce reviewable inferred-profile candidates, and contradictory
-signals can reduce sticky profile hypotheses. The remaining gap is depth:
+signals produce evidence-backed inferred-profile candidates, and contradictory
+signals can reduce sticky profile hypotheses. The revised direction allows supported
+profiles to adapt automatically; review is used when explicitly configured, not
+as a universal profile gate. The remaining gap is depth:
 dimensions are useful but narrow, and explanations are still structural rather
 than psychologically rich.
 

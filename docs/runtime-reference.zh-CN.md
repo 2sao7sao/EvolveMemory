@@ -4,11 +4,43 @@
 
 以下公式与接口描述确定性原型。模块存在不等于完整宿主对话链路已经接通，也不代表真实模型收益已经测量。
 
-## 2026-11-16 控制与 scope 实现切片
+## 2026-11-16 自主理解方向修正
 
-以下描述本轮**已通过本地验证的控制与 scope 实现切片**。完整 S1 宿主、真实模型调用、交付回执及并发撤销保证仍未完成。这里的范围限制用于本地原型，不等于生产认证或多租户隔离已经验证。
+用户在 2026-11-16 后续明确取代了“所有个人画像先确认才适配”的旧选择。当前方向是：AI 从独立证据中自主形成并持续修正对人的理解；普通偏好证据充分时可自动入库，并在相关对话中自然适配，不逐项索取画像确认。弱证据暂存为假设或不使用，不默认转成提问。长期协作与陪伴是愿景，项目任务是首个验证场景。
 
-2026-11-16 本地结果：pytest **115 passed、72 subtests passed**；unittest **115 passed**；确定性 eval **11/11**、无失败；adaptive replay **PASS**。独立本地复核未发现本切片范围内的阻断项。结果对应本切片代码及以下测试；远端验证以关联实现 PR 的 Checks 为准，本地结果不替代远端检查。
+本修订 U0 的规则/API 切片本地通过：**pytest 157 tests + 101 subtests**、**unittest 157 tests**、**11/11 确定性套件**（`failures=[]`）及 **replay PASS**，使用独立临时数据目录，未调用 provider。分支 `feat/autonomous-understanding-20261116` 尚待远端发布和 Checks，未声称已经合入 main；PR #15 历史证据单独保留。目前仍由规则和外部 `llm_payload` 提供候选；尚未证明真实 provider 或完整多轮宿主的自然体验。
+
+| 方面 | 修正后的契约 |
+| --- | --- |
+| 晋升 | 多个独立且可用的来源 turn 可支持自动画像入库与相关的自然风格适配；不普遍要求 `user_review_approved`。模型自评分、同一 turn 的反复提取不足以晋升。 |
+| 持续修正 | 明确纠错与反证可降低、替换或退役推断。需区分稳定默认、持续变化与情境例外；广泛覆盖仍是验收目标。 |
+| 弱证据 | 保留为暂定假设或抑制，不要求用户逐一核实；仅当前问题存在实质歧义时作必要澄清。 |
+| 自然使用 | 相关偏好自然融入回答，不贴画像标签、不反复列来源、不无故提旧事；用户追问原因或变化/冲突需要说明时解释。 |
+| 控制边界 | scope、来源有效性、key/layer 禁用、`allow_inferred_profile`、敏感设置和主开关继续约束积累与使用。 |
+| Review | 明确配置的 review 及敏感/受限规则继续可用；普通有证据的画像适配默认不等待确认标记。 |
+
+[体验验收 U01–U08](next-development-spec.md#fixed-experience-acceptance)描述待验证行为，不代表真实回答的自然程度已经通过。
+
+### 当前候选实现的具体边界
+
+下列 U0 行为已实现，并由上述本地检查覆盖；U01–U08 实际体验尚未验收，下一步是 S1-a 最小宿主与临时上下文：
+
+| 机制 | 当前行为与限制 |
+| --- | --- |
+| 服务端资格 | 仅服务端根据受控 live evidence pool 授予 `metadata.profile_qualification={"policy_version":"autonomous-v1","method":"scoped_turn_evidence","distinct_turn_count":N}`；外部 `llm_payload` 自报这个标记不授予资格。 |
+| 有界证据规则 | 至少 **2 个不同真实来源 turn**、净支持 **≥1.2**，每个 dimension 保留最近 **8 个 turn**，采用 **30 天 half-life** 且无永久权重底线；平局不选。均为工程启发式，不是已经验证的心理或模型质量阈值。 |
+| 读取时重算 | query 与 prompt-context 按当前时钟、同 scope 的 live 来源重算资格；没有新 ingest，支持过期/衰减或不可用也可使画像停止参与。这是读取时抑制，不证明完整依赖清理或并发撤销。 |
+| Review 默认与迁移 | `review_required_for_layers=[]`。旧设置未标 explicit 且列表恰为 `["inferred_profile"]` 时迁移为自动，旧列表和原因保存在 `legacy_review_required_for_layers`、`review_policy_migration`。旧 schema 无法区分旧默认与用户手动设置的同值列表，因此记录歧义。今后 PUT 设置 review 字段会标 `review_required_for_layers_explicit=true`，明确配置继续保留。 |
+| Ingest 重试身份 | 可选 `turn_id` 供宿主在重试时复用同一来源 turn；未提供则每个请求生成新身份。不能宣称默认请求幂等；需要重试去重时由宿主传稳定 ID。 |
+| 直接画像纠错 | 显式 `POST /v2/users/{user_id}/memory/{memory_id}/correct` 为纠正值形成新的用户依据。旧推断来源保留在旧版本/审计中，不得继续用旧 evidence pool 筛掉纠正值；编译策略与 prompt 也必须采用纠正值，不能残留旧 high 指令。不伪造 `user_review_approved`，当前设置和 scope 继续生效。 |
+| 本轮覆盖 | 两个上下文入口识别有限的当前偏好要求，仅本次抑制冲突旧样式，不写成长期开关或偏好；否定、引文和更广情境理解受规则边界限制。 |
+| 自然适配提示 | 提示词要求应用偏好而不复述画像标签、不为展示记忆提旧事；尚无基于回答历史的重复控制器，也未证明真实对话自然度。 |
+
+## PR #15 控制与 scope 基础
+
+以下记录 **PR #15 的控制与 scope 基础**。画像策略由上节修正；其余存储与范围边界继续保留。完整 S1 宿主、真实模型调用、交付回执及并发撤销保证仍未完成。这里的范围限制用于本地原型，不等于生产认证或多租户隔离已经验证。
+
+2026-11-16 本地结果：pytest **115 passed、72 subtests passed**；unittest **115 passed**；确定性 eval **11/11**、无失败；adaptive replay **PASS**。独立本地复核未发现本切片范围内的阻断项。这些历史结果属于 [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15)，已合并至 `8e3ab17` 且[远端 CI 通过](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401)。它们不验证本修订的自动理解改动。
 
 ### 一条 v2 存储与读取路径
 
@@ -20,6 +52,7 @@ v2 使用 normalized repository 作为唯一读写来源。`turns/ingest` 不再
 
 | 入口 / 字段 | 实现语义 |
 | --- | --- |
+| Ingest `turn_id` | 可选来源身份；宿主重试须复用，省略时每请求生成新值，不是默认幂等。 |
 | Ingest `session_id`, `project_id`, `domain` | 由可信宿主提供当前范围；不由 query 自行猜测授权。 |
 | Ingest `memory_scope` | 可为 `turn/session/project/domain/global`；未指定时为 `session`。自然语言仅可收窄为临时 turn/session，不能扩大项目或全局分享。 |
 | Query / prompt-context `session_id`, `project_id`, `domain` | session 记录按 session 与 project 精确匹配；`None` 表示未绑定值，不表示全用户搜索。 |
@@ -48,9 +81,9 @@ v2 使用 normalized repository 作为唯一读写来源。`turns/ingest` 不再
 
 同项目后续 query 可使用 `{"session_id":"thread-A2","project_id":"project-A","query":"在本项目中怎么回答代码 review 问题？"}`。`project-B` 或未绑定 project 不继承 A 的权限；相关度与文字中的“全局”不能打开分享范围。
 
-### 画像确认、事件追问与复核
+### 画像证据、事件追问与复核
 
-- 个人 inferred profile 除了通过当前设置和 scope，还必须有实际 review resolution 产生的 `metadata.user_review_approved=true`（附 `review_id` 与确认时间）。高置信、旧 `allowed_use` 或全局画像开关不代替这条确认标记；支持该画像的记录被禁用后也不能继续借画像带入内容。
+- 修正后的默认允许独立证据满足推断规则的画像在当前设置与 scope 内自动适配。PR #15 普遍要求 `metadata.user_review_approved=true` 的旧规则已被取代；明确配置 review 时仍可使用人工批准。被禁用、过期、删除或越界的支持记录不能借画像回填。本地检查覆盖该规则/API 行为，不证明广泛情境理解或真实回答自然度。
 - 事件追问默认逐事件关闭。通过 `PUT /v2/users/{user_id}/memory/events/{memory_id}/followup` 与 `{"enabled":true}` 为一个事件开启；`{"enabled":false}` 关闭。它受全局 `allow_event_followup` 和当前记录控制约束；全局开关打开不会批量开启事件。
 - Review resolve 在批准时重新读取当前设置。候选排队后若 key/layer/sensitivity/project/global 权限被撤回，返回 **409** 并保持 **pending**，不先标 approved 再失败。
 - 纠错只接受 ACTIVE 目标；删除和 forget-all 会撤销相关 pending reviews。审批再次检查 target/source 的状态、scope、设置与时间，不能用排队的旧提案恢复已删除或过期的来源。
@@ -247,7 +280,7 @@ merge、supersede 或 ask-user-confirmation。
 | Result path | 决策来源 |
 | --- | --- |
 | `create` | 分数过阈值，且没有 review policy 阻挡。 |
-| `review` | sensitivity、restricted consent、低置信度或低 authority 需要用户确认。 |
+| `review` | 明确配置的 review 或敏感/受限规则需要用户输入；普通画像的弱证据保留为暂定或不使用，不默认触发确认。 |
 | `merge` | 重复 memory 只追加 evidence，不创建新 record。 |
 | `supersede` | 更高或同等 authority 的 candidate 可以替换 exclusive 冲突值。 |
 | `reject` | settings、明确拒绝、硬置信度下限或低加权收益阻止写入。 |
