@@ -660,12 +660,28 @@ class MemorySystemTest(unittest.TestCase):
                 store=self.store,
                 user_id="user-1",
                 session_id="session-1",
+                now=timestamp,
             )
             keys = [record.key for record in repo.list_records(user_id="user-1")]
 
             self.assertEqual(len(records), 2)
             self.assertIn("life_event", keys)
             self.assertIn("communication_style", keys)
+
+    def test_normalized_sqlite_migration_excludes_expired_memory(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = NormalizedSQLiteMemoryRepository(Path(temp_dir) / "memory.sqlite3")
+            self.store.extend(self.extractor.extract(
+                "我最近准备面试，回答直接一点。",
+                source="turn_1",
+                timestamp=datetime(2026, 4, 16, 9, 0, tzinfo=self.tz),
+            ))
+            records = repo.migrate_store(
+                store=self.store,
+                user_id="user-1",
+                now=datetime(2026, 8, 1, 9, 0, tzinfo=self.tz),
+            )
+            self.assertEqual([record.key for record in records], ["communication_style"])
 
     def test_normalized_sqlite_repository_applies_write_operations(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1400,6 +1416,51 @@ class MemoryApiTest(unittest.TestCase):
         self.assertEqual(ingest.status_code, 200)
         self.assertEqual(ingest.json()["operations"][0]["operation"], "reject")
         self.assertEqual(ingest.json()["persisted_records"], [])
+
+    def test_v2_memory_opt_out_blocks_both_read_paths_and_legacy_fallback(self) -> None:
+        for storage in ("normalized", "legacy"):
+            with self.subTest(storage=storage):
+                user_id = f"opt-out-user-{uuid4().hex}"
+                session_id = f"opt-out-session-{uuid4().hex}"
+                root = f"/v2/users/{user_id}"
+                if storage == "normalized":
+                    ingest_path = root + "/turns/ingest"
+                else:
+                    ingest_path = f"/sessions/{user_id}:{session_id}/ingest"
+                ingest = self.client.post(ingest_path, json={
+                    "session_id": session_id,
+                    "text": "记住，回答直接一点，先给结论。",
+                    "timestamp": "2026-11-16T12:00:00+00:00",
+                })
+                self.assertEqual(ingest.status_code, 200)
+                query = {
+                    "session_id": session_id,
+                    "query": "怎么回答代码 review 问题？",
+                    "timestamp": "2026-11-16T12:01:00+00:00",
+                }
+                before = self.client.post(root + "/memory/query", json=query)
+                self.assertEqual(before.status_code, 200)
+                self.assertTrue(before.json()["compiled_context"]["style_policy"])
+                settings = self.client.put(root + "/memory/settings", json={"memory_enabled": False})
+                self.assertEqual(settings.status_code, 200)
+
+                disabled = self.client.post(root + "/memory/query", json=query)
+                self.assertEqual(disabled.status_code, 200)
+                result = disabled.json()
+                self.assertEqual(result["candidates"], [])
+                self.assertEqual(result["gate"], {"selected": [], "suppressed": []})
+                self.assertEqual(result["retrieval_plan"]["retrieval_modes"], [])
+                prompt = self.client.post(root + "/prompt-context", json=query)
+                self.assertEqual(prompt.status_code, 200)
+                for context in (result["compiled_context"], prompt.json()["memory_context"]):
+                    for field in ("direct_facts", "style_policy", "event_followups", "hidden_constraints", "clarification_prompts"):
+                        self.assertEqual(context[field], [])
+                self.assertNotIn("Start with the conclusion.", prompt.json()["assembled_prompt"])
+
+                enabled = self.client.put(root + "/memory/settings", json={"memory_enabled": True})
+                self.assertEqual(enabled.status_code, 200)
+                after = self.client.post(root + "/memory/query", json=query)
+                self.assertEqual(after.json()["compiled_context"]["style_policy"], before.json()["compiled_context"]["style_policy"])
 
     def test_v2_delete_and_forget_all_do_not_fallback_to_legacy_memory(self) -> None:
         user_id = f"delete-user-{uuid4().hex}"
