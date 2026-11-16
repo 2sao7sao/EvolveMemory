@@ -2,7 +2,7 @@
 
 # EvolveMemory
 
-**A local memory runtime that controls what an AI assistant remembers and how it may use it.**
+**A memory runtime for AI that learns about people over time, revises its understanding, and adapts naturally.**
 
 <p align="center">
   <a href="README.zh-CN.md">简体中文</a> ·
@@ -20,16 +20,17 @@
 
 ## Why EvolveMemory
 
-An assistant can retrieve the right memory and still use it in the wrong way. EvolveMemory separates candidate extraction, write decisions, retrieval, allowed use, and correction so each decision can be inspected.
+Long-term collaboration needs more than recalling facts: an assistant should learn stable preferences, recognize change and context, and respond naturally after correction. EvolveMemory explores that experience with inspectable evidence, memory updates, and controls. Project-task continuation is the first test scenario; long-term collaboration and companionship are the vision.
 
 | Capability | Available scope |
 | --- | --- |
-| Govern writes | Rule extraction and provider-free LLM payload validation; create, merge, review, reject, or retain only for the current turn. |
+| Form and revise understanding | Evidence accumulation and correction exist; this revision enables automatic profile adaptation from independent source turns. The U0 rule and API slice passes local checks; user experience remains unverified. |
+| Govern writes | Rule extraction and external LLM payload validation; create, merge, review when configured, reject, or retain only for the current turn. |
 | Control use | Gate retrieved memories into direct facts, style policy, follow-up cues, hidden constraints, clarification, summary, or suppression. |
 | Correct and inspect | Local JSON / SQLite stores, review queue, correction, deletion, forget-all, and audit export. |
 | Reproduce behavior | Offline replay and deterministic regression suites, with inspectable scoring factors. |
 
-This is a research prototype. Production embeddings, provider-backed extraction, host conversation orchestration, and production security are not validated end to end. The authority, scope, lifecycle, and interaction modules have local implementations; their presence does not establish complete integration into every API path.
+This is a research prototype using rules and externally supplied `llm_payload`, not an integrated model provider. On 2026-11-16 the user replaced the earlier confirmed-only profile rule: supported ordinary preferences should adapt automatically, while weak evidence stays tentative without default confirmation questions. Settings, scope, source validity, and opt-out remain effective. A complete multi-turn host, broad stable/change/context reasoning, and the intended natural experience are not yet validated.
 
 ## Quick start
 
@@ -85,27 +86,26 @@ python -m unittest discover -s tests -p 'test_*.py'
 python -m evals.runner --suite all
 ```
 
-The 2026-11-16 [controls/scope implementation slice (PR #15)](https://github.com/2sao7sao/EvolveMemory/pull/15) passed 115 local tests (72 pytest subtests), all 11 deterministic eval suites, and the standalone adaptive replay. PR #15 is merged and its [hosted CI passed](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401). These results cover seeded cases and HTTP handlers through FastAPI’s test client. They do not establish a complete host loop, live model helpfulness, retrieval at scale, production latency, or deployed service readiness. The earlier PR #13 baseline checks are recorded separately in [maintenance notes](docs/maintenance.md); see [protocol §13](docs/conversation-memory-invocation-spec.md#13-历史缺口主线修复与本轮状态) for this slice.
+The merged [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) baseline passed 115 local tests (72 pytest subtests), all 11 deterministic suites, the standalone replay, and [hosted CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401). Those results cover the earlier controls/scope implementation, including its now-superseded profile-confirmation rule. **This revision passed 157 local tests (101 pytest subtests), all 11 deterministic suites, and replay PASS**, using an isolated temporary data directory and no provider. Implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). These checks complete the local U0 slice, not experience acceptance U01–U08, a complete host, or real-model helpfulness. See [maintenance evidence](docs/maintenance.md).
 
 ## Status and roadmap
 
-**Recommendation: continue maintenance, with correctness and one complete conversation path as the next milestone.**
+**Build toward lasting, revisable understanding; verify it first through project-task collaboration.**
 
 | Priority | Next step | Completion evidence |
 | --- | --- | --- |
-| P0 | Preserve normalized-only storage, settings, and scope regressions | PR #15 is merged with passing local checks and hosted CI. |
-| P1 | Complete temporary turn scope and the minimal host in [draft PR #12’s protocol](docs/conversation-memory-invocation-spec.md) | Current-turn overrides and actual model-call input capture; local ingest protections alone do not complete S0-c / S1. |
-| P1 | Integrate scope, correction, and lifecycle checks into a single-thread loop | Source-backed cases that cover old decisions, opt-out, stale events, and prompt delivery. |
-| P2 | Introduce real extraction / embedding providers and measure them | Versioned datasets, provider configuration, costs, latency, and failure cases. |
-| P2 | Restore the product-page publishing path | Successful Pages deployment and an independently checked live URL. |
+| U0 — locally checked | Automatic, evidence-backed profile adaptation | Local rules/API regressions pass; remote publication and user-experience acceptance remain separate. |
+| Next: S1-a / S0-c | Minimal host and temporary context | Actual delivered input and subsequent answers respect current requests, corrections, and existing scope. |
+| S1 experience | A useful project-task continuation | Recover old decisions, change after correction, and avoid repetitive reminders or irrelevant events. |
+| S2–S4 | Lasting understanding and real-provider evaluation | Distinguish stable preferences, persistent change, and contextual exceptions; measure helpfulness and correction effort over time. |
 
-PR #12 now records the confirmed project-task continuation choices and the remaining protocol work. Its historical CI failure came from the migration-clock test fixed in PR #13; new branch checks must use the updated revision. PR #15 delivers the validated controls/scope slice; full S0-c / S1, complete cross-thread retrieval, and real-model helpfulness remain unverified. See [maintenance status](docs/maintenance.md) and the [development spec](docs/next-development-spec.md) for scope and evidence boundaries.
+[Draft PR #12](https://github.com/2sao7sao/EvolveMemory/pull/12) records the revised direction and remaining protocol. The first project scenario does not reduce the vision to task tracking. See [positioning](docs/positioning.md), the [development plan](docs/next-development-spec.md), and [experience acceptance U01–U08](docs/next-development-spec.md#fixed-experience-acceptance) for the distinction between vision, implementation, and unverified behavior.
 
 ## Documentation and assets
 
 | Resource | Purpose |
 | --- | --- |
-| [Conversation-memory protocol](docs/conversation-memory-invocation-spec.md) | Confirmed product choices, scoped evidence, delivery capture, and fixed acceptance cases; the full protocol is not complete. |
+| [Conversation-memory protocol](docs/conversation-memory-invocation-spec.md) | Autonomous understanding, source/scope boundaries, delivery capture, and fixed experience acceptance; the full protocol is not complete. |
 | [Runtime reference](docs/runtime-reference.md) | Retrieval math, activation, causal relevance, write governance, Python and HTTP surfaces. |
 | [Adaptive replay walkthrough](examples/adaptive_memory_replay.md) | Inputs, outputs, and what each seeded check establishes. |
 | [Maintenance notes](docs/maintenance.md) | Current evidence, prioritized follow-up, and visual asset inventory. |

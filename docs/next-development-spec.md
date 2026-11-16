@@ -1,100 +1,82 @@
-# EvolveMemory Next Development Spec v0.2
+# EvolveMemory Next Development Spec v0.3
 
-Updated 2026-11-16. Product choices are confirmed; the controls and scope slice is being implemented. This document does not establish that the full conversation runtime is complete.
+Updated **2026-11-16** after the user's direction correction. The earlier confirmed-only profile decision is superseded: AI should autonomously develop and revise its understanding from evidence, then adapt naturally within existing controls. The new U0 implementation slice passed local checks; implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). PR #15 results describe its earlier baseline.
 
-## Core Positioning
+## Product direction
 
-EvolveMemory is the memory control plane for AI personalization: it decides what to remember, how to store, when to use, how to use, when to suppress, and how to turn memory uncertainty into dynamic interaction.
+The goal is long-term collaboration and companionship in which an AI increasingly understands a person, distinguishes stable preferences from change and context, and reduces repeated explanations. Project-task continuation is the first bounded scenario, not the whole product vision. See [positioning](positioning.md).
 
-## North Star
+Supported ordinary preferences should shape responses without a confirmation ritual or repeated reminders of past conversations. Weak evidence stays tentative or unused; a useful clarification is reserved for a current answer that materially depends on an unresolved ambiguity. Current instructions, corrections, settings, source availability, and scope constrain every inference and use.
 
-> Continuously reduce the intervention cost users pay to make a system understand them, while preserving user control over privacy, memory, outcomes, and high-risk actions.
-
-## Target Architecture (v3)
-
-For the concrete multi-turn read path, see [Conversation Memory Invocation and Use Protocol](conversation-memory-invocation-spec.md) (Chinese protocol draft v0.2, updated 2026-11-16). The user has selected project-task continuation, authorized reuse within the same project, personal-profile adaptation only after confirmation, per-event opt-in follow-ups, and conditional source hints. Numerical budgets and the full proposed interfaces remain unvalidated. Section 13 separates the historical `c628f00` gaps from the master read-opt-out and migration-clock fixes already merged in PR #13 at `main@3aa4285`, the current implementation slice, and remaining work. Module availability below does not establish end-to-end integration.
+## Target architecture
 
 ```text
-User Turn / App Event / UI Feedback
-        ↓
-TurnPreprocessor
-        ↓
-LLM Proposal Extractor + Rule Fallback
-        ↓
-Authority & Scope Resolver          ← NEW
-        ↓
-Write Governance Engine (v3)
-        ↓
-Normalized Memory Store
-        ↓
-Lifecycle / Staleness Engine         ← NEW
-        ↓
-Hybrid Retriever
-        ↓
-Memory Use Gate
-        ↓
-Response Policy Compiler
-        ↓
-Memory Interaction Layer             ← NEW
-        ↓
-Prompt-safe Context + Dynamic Controls + Audit Trace
+user turns / app events / explicit corrections
+    → source identity + context + time
+    → rule or model proposals
+    → evidence accumulation / counter-evidence / scope checks
+    → revisable understanding: stable default / change / contextual exception
+    → governed storage and lifecycle
+    → scoped retrieval + memory-use gate
+    → natural response policy + optional source explanation
+    → host delivery + observed feedback
 ```
 
-## Key Design Decisions
+The full architecture is a target. The present extractor uses rules and external `llm_payload`; it does not call a real provider. The host and broad stable/change/context reasoning remain incomplete. [Conversation protocol](conversation-memory-invocation-spec.md) defines the proposed read path and acceptance matrix.
 
-1. **Memory ≠ just prompt context.** Output includes `interaction_controls` alongside `prompt_context`.
-2. **User said ≠ user authorized permanent storage.** Authority model distinguishes explicit commands from inferences.
-3. **Cold-start and mature-phase are the same system at different states.** Controls evolve from explore → confirm → exception.
-4. **Intervention reduction must be measurable.** Core metric: repeat-task intervention decrease ≥ 30% between sessions 1–3 and 10+.
+## Current decisions
 
-## Development Priority
+- Independent, usable multi-turn evidence can support automatic storage and relevant, natural adaptation. A user-review marker is no longer a universal requirement for inferred profiles.
+- Explicit preferences and corrections take priority. Direct profile `/correct` supplies new user evidence; old inference sources stay on the old version/audit and do not filter the corrected value through the old pool. It does not pretend a review was approved. Temporary requests do not become global traits, and contradictory evidence can revise earlier understanding.
+- Weak signals do not automatically trigger confirmation. Repeated extraction, model paraphrases, or retrieval of one source do not count as independent observations.
+- Natural adaptation uses the preference where relevant; it does not announce a profile or bring up old events just to demonstrate memory.
+- Same-project authorized reuse, per-event follow-up opt-in, conditional source hints, settings, and source/scope boundaries remain in force. Understanding someone does not expand access or authorize actions.
 
-| Slice | Deliverable | Acceptance boundary |
+## Implementation and evidence
+
+| Layer | Current status | Boundary |
 | --- | --- | --- |
-| Existing baseline fixes | v2 master read opt-out and deterministic migration clock | Already merged in PR #13; retain those regressions. |
-| S0-a | Normalized-only v2 reads/writes with shared persisted controls; explicit legacy migration | Existing records/new writes respect disabled keys/layers/features; actual review markers and per-event opt-in are verified independently. No implicit legacy fallback or dual-write. |
-| S0-b | Persist and propagate scope/project/domain/authority | Reload tests, permitted same-project reuse, cross-project exclusion, exact unbound-identifier semantics, and explicit migration compatibility. |
-| S0-c | Turn-local restrictions and temporary scope | Current-turn overrides do not silently become long-term/global preferences; a request can narrow existing access, never expand it. |
-| S1-a | Minimal host adapter and captured model-call input | Inspect the actual package delivered to a deterministic callable; compilation alone is not delivery, and a fake callable is not a live provider. |
-| S1-b | Bounded project-task continuation | Preserve recent turns, recover an older decision with sources, and apply current-turn overrides. |
-| S2–S4 | Complete cross-thread retrieval, governed feedback, providers, and quality/performance evaluation | Independent evidence for history coverage, authorization, model behavior, latency, cost, and user experience. |
+| Storage and controls | [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) merged at `8e3ab17`; 115 local tests, 72 pytest subtests, 11 deterministic suites, replay PASS; [hosted CI passed](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401) | This historical slice included the now-superseded confirmed-only profile rule. Its counts do not validate the new automatic-understanding behavior. |
+| Automatic understanding | Implemented candidate: server-qualified `autonomous-v1` from ≥2 real turns; live evidence re-evaluation, bounded decay, finite current-query overrides | Local U0 checks pass. Optional `turn_id` supports host-managed retry identity; broad contextual understanding and response-history repetition control remain unproven. |
+| Extraction and retrieval | Rules, external proposal payload validation, deterministic hash embedding substitute | Real extraction/embedding providers and full-history coverage remain unverified. |
+| Conversation delivery | Context compilation and HTTP surfaces exist | Complete host orchestration, model-call capture, delivery receipts, and longitudinal experience remain pending. |
 
-The [controls/scope implementation slice (PR #15)](https://github.com/2sao7sao/EvolveMemory/pull/15) passed 115 local tests (72 pytest subtests), all 11 deterministic eval suites, and the standalone adaptive replay on 2026-11-16. This covers S0-a/S0-b behavior and temporary-ingest protections; S0-c, concurrent revocation/full dependency invalidation, S1 delivery, and real-provider validation remain incomplete. S1-a is brought forward as the first delivery seam. PR #15 is merged at `8e3ab17` and its [hosted CI passed](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401). Protocol section 13 records the slice and evidence; a module checkmark does not establish the remaining protocol.
+### Current local validation
 
-## Key Metrics
+On 2026-11-16, implementation branch `feat/autonomous-understanding-20261116` passed **157 pytest tests + 101 subtests**, **157 unittest tests**, **11/11 deterministic eval suites** (`failures=[]`), and **adaptive replay PASS**, using an isolated temporary data directory without a provider call. Implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16).
 
-| Metric | Target |
-| --- | --- |
-| Extraction slot F1 | ≥ 0.85 |
-| Temporary-to-global error | ≤ 3% |
-| Third-party confusion rate | ≤ 2% |
-| Gate action accuracy | ≥ 0.85 |
-| Sensitive prompt leakage | ≤ 0.5% |
-| Stale direct-use rate | ≤ 2% |
-| Correction residue rate | ≤ 2% |
-| Interaction acceptance rate | ≥ 40% |
-| Intervention reduction (sessions 10+) | ≥ 30% |
-| Downstream helpfulness delta | ≥ +10% |
+The local U0 rules/API slice is complete. Experience acceptance U01–U08 remains open: tests of state, evidence, and compiled policy do not establish natural multi-turn answers. The next delivery step is **S1-a minimal host plus temporary context / S0-c**, followed by observed response and user-experience evaluation. Commands and evidence are recorded in [maintenance](maintenance.md).
 
-## Module Status
+## Development stages
 
-These are existing module-level statuses, not completion of the integrated S0/S1 path or the newly confirmed product defaults.
-
-| Module | Status | Location |
+| Slice | Deliverable | Acceptance |
 | --- | --- | --- |
-| Authority Resolver | Implemented | `memory_system/governance/authority.py` |
-| Scope Resolver | Implemented | `memory_system/governance/scope.py` |
-| Write Governance v3 | Implemented (ephemeral_only, negative_preference) | `memory_system/writing.py` |
-| Interaction Controls | Implemented | `memory_system/interaction/controls.py` |
-| Intervention Decider | Implemented | `memory_system/interaction/intervention_decider.py` |
-| Staleness Engine | Implemented | `memory_system/lifecycle/staleness.py` |
-| LLM Extractor (provider-backed) | Interface only | `memory_system/extraction.py` |
-| Hybrid Retrieval (embeddings) | Interface only | Future PR |
-| User Governance UX | Not started | Future PR |
-| Security Hardening | Not started | Future PR |
+| S0-a/b foundation | Normalized-only reads/writes, consistent settings, persisted exact scope, explicit migration | Retain PR #15 regression coverage; no implicit legacy access or scope expansion. |
+| U0 automatic understanding | Accumulate independent evidence and automatically adapt supported preferences; allow correction and contradictory evidence to revise the inference | No mandatory confirmation for ordinary supported profiles; duplicate/invalid sources cannot create confidence; weak evidence does not cause unsolicited questions. |
+| S0-c context and temporary scope | Current-turn override, current-materials-only, no-write mode, no temporary-to-global escalation | Verify both actual delivered context and persisted state across successive turns. |
+| S1-a minimal host | Capture the actual input delivered to a replaceable model callable | Compilation, delivery, generated answer, and sent answer are distinct; deterministic callable results are not provider evidence. |
+| S1-b first experience | Project-task continuation with natural preference adaptation and correction across turns | Old decisions remain source-backed; the assistant changes after correction and avoids unnecessary memory recitals. |
+| S2 lasting understanding | Stable defaults, evolving preferences, contextual variation, broader authorized history | Diverse changes/contexts and stale-source cases; neither single exceptions nor old habits dominate automatically. |
+| S3 feedback and lifecycle | Full dependency invalidation, concurrent revocation, calibrated confidence, event receipts | Versioned evidence, corrections, suppression, and delivery outcomes remain consistent. |
+| S4 real provider and experience | Provider integration plus comparative and longitudinal user evaluation | Measure helpfulness, correction effort, naturalness, unwanted recall, latency, and cost; publish failures and limits. |
 
-## Delivery boundaries
+## Fixed experience acceptance
 
-The earlier numbered work-package list was a design sequence, not the repository's actual GitHub PR numbering. The current [PR #12](https://github.com/2sao7sao/EvolveMemory/pull/12) is the conversation-protocol draft; [PR #13](https://github.com/2sao7sao/EvolveMemory/pull/13) delivered targeted maintenance fixes, not security hardening.
+| ID | Scenario | Required observation |
+| --- | --- | --- |
+| U01 | Distinct turns show a stable preference; a later related task arrives | Appropriate style adaptation, no mandatory confirmation, no “I remember…” boilerplate. |
+| U02 | User corrects an inferred preference | The next relevant answer changes and the old inference is revised; stale evidence does not restore it. |
+| U03 | Work summaries should be brief; study explanations should be detailed | Contextual preferences coexist and apply to the matching task. |
+| U04 | Compare “this time, be brief” with a sustained new pattern | Temporary override stays local; a lasting change can revise the default. |
+| U05 | A weak or duplicated signal appears | No unsupported profile is applied and no unnecessary confirmation prompt is generated. |
+| U06 | An unrelated event or personal fact is retrievable | The answer stays on task without recalling it or asking an unsolicited follow-up. |
+| U07 | A supporting source expires, is deleted, or becomes out of scope | The derived adaptation cannot carry that excluded information into either context path. |
+| U08 | User asks why the assistant adapted | It explains the inference, uncertainty, and available sources without pretending it was explicitly confirmed. |
 
-Use the slices above and the fixed F01–F10 / H01–H04 matrix in the [protocol](conversation-memory-invocation-spec.md) for the next changes. Preserve separate results for local contract tests, captured host delivery, hosted CI, real-provider calls, and user acceptance. Complete cross-thread history and real-model helpfulness remain future work.
+U01–U08 are requirements, not passed cases. Unit tests check state and policy; captured host inputs check delivery; final responses and user feedback check the experience. No layer substitutes for the next.
+
+## Evaluation and remaining gaps
+
+Track unsupported adaptation, correction residue, context confusion, repeated memory mentions, unnecessary questions, useful adaptation, and user-reported effort. Use the same tasks/model with recent-context-only and memory-enabled variants; include counterexamples and blinded review. Numerical quality and latency targets need baselines and agreed datasets before acceptance.
+
+The old numbered work-package list was a design sequence, not GitHub PR numbers. PR #12 remains the protocol draft, PR #13 repaired the read opt-out and migration clock, and PR #15 delivered controls/scope. Full S0-c, all dependent-record invalidation, concurrent revocation, S1 multi-turn delivery, real-provider quality, and production readiness are still open.
