@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Iterable
 
+from .adaptation import resolve_profile_conflicts
 from .registry import MemorySlotRegistry
 from .schema import (
     AuditAction,
@@ -515,11 +516,19 @@ class DialogueMemoryExtractor:
         source: str,
         timestamp: datetime,
     ) -> list[MemoryItem]:
+        # Conservative rule fallback, not a general intent parser. Quoted/code
+        # text is evidence being discussed, not a preference command. Indirect
+        # speech, sarcasm and compound instructions still require host reasoning.
         patterns = [
             ("直接一点", "communication_style", "direct", "communication_style"),
             ("别太啰嗦", "detail_preference", "concise", "detail_preference"),
             ("简洁一点", "detail_preference", "concise", "detail_preference"),
             ("多给细节", "detail_preference", "detailed", "detail_preference"),
+            ("详细解释", "detail_preference", "detailed", "detail_preference"),
+            ("详细讲解", "detail_preference", "detailed", "detail_preference"),
+            ("详细说明", "detail_preference", "detailed", "detail_preference"),
+            ("详细一点", "detail_preference", "detailed", "detail_preference"),
+            ("展开讲", "detail_preference", "detailed", "detail_preference"),
             ("慢慢讲", "communication_pace", "slow", "communication_pace"),
             ("分步骤", "explanation_structure", "step_by_step", "explanation_structure"),
             ("给我清单", "planning_preference", "checklist", "planning_preference"),
@@ -536,23 +545,66 @@ class DialogueMemoryExtractor:
             ("帮我挑刺", "collaboration_preference", "challenge", "collaboration_preference"),
             ("不要问太多问题", "followup_preference", "only_when_blocked", "followup_preference"),
         ]
-        results: list[MemoryItem] = []
+        quote_pairs = {"“": "”", "‘": "’", "「": "」", "『": "』", '"': '"', "'": "'"}
+        quoted_spans: list[tuple[int, int]] = [
+            (match.start(), match.end()) for match in re.finditer(r"(?m)^\s*>[^\n]*", text)
+        ]
+        quote_stack: list[tuple[str, int]] = []
+        for match in re.finditer(r"`+|[“”‘’「」『』\"']", text):
+            token = match.group()
+            before = text[match.start() - 1] if match.start() else ""
+            after = text[match.end()] if match.end() < len(text) else ""
+            if token == "'" and before.isascii() and after.isascii() and before.isalnum() and after.isalnum():
+                continue  # An apostrophe inside a word is not a quote delimiter.
+            if quote_stack and quote_stack[-1][0].startswith("`"):
+                if token == quote_stack[-1][0]:
+                    _, start = quote_stack.pop()
+                    if not quote_stack:
+                        quoted_spans.append((start, match.end()))
+                continue
+            if quote_stack and token == quote_stack[-1][0]:
+                _, start = quote_stack.pop()
+                if not quote_stack:
+                    quoted_spans.append((start, match.end()))
+            elif token in quote_pairs or token.startswith("`"):
+                quote_stack.append((quote_pairs.get(token, token), match.start()))
+        if quote_stack:
+            quoted_spans.append((quote_stack[0][1], len(text)))
+
+        negated_prefix = re.compile(
+            r"(?:不要|不用|不必|无需|别|不想|不需要|不希望|不是|禁止|不)"
+            r"(?:再|总是|一直|继续|那么|太|过于|刻意|直接|给我|给我们|请|你|您|先|要|去|来|这样|那样|\s)*$"
+        )
+        matches: list[tuple[int, str, str, str, str, bool]] = []
         for token, key, value, group in patterns:
-            if token in text:
-                results.append(
-                    self._make_memory(
-                        memory_type=MemoryType.PREFERENCE,
-                        key=key,
-                        value=value,
-                        confidence=0.93,
-                        source=source,
-                        evidence=token,
-                        timestamp=timestamp,
-                        exclusive_group=group,
-                        coexistence_rule="mutually_exclusive",
-                    )
+            for match in re.finditer(re.escape(token), text):
+                if any(start <= match.start() < end for start, end in quoted_spans):
+                    continue
+                clause_prefix = re.split(r"[，,。.!！?？;；:\n]", text[:match.start()])[-1]
+                matches.append(
+                    (match.start(), token, key, value, group, bool(negated_prefix.search(clause_prefix)))
                 )
-        return results
+        latest: dict[str, tuple[int, str, str, str]] = {}
+        for position, token, key, value, group, negated in sorted(matches):
+            if negated:
+                if key in latest and latest[key][2] == value:
+                    del latest[key]  # A later negation cancels the same instruction.
+                continue
+            latest[key] = (position, token, value, group)
+        return [
+            self._make_memory(
+                memory_type=MemoryType.PREFERENCE,
+                key=key,
+                value=value,
+                confidence=0.93,
+                source=source,
+                evidence=token,
+                timestamp=timestamp,
+                exclusive_group=group,
+                coexistence_rule="mutually_exclusive",
+            )
+            for key, (_, token, value, group) in sorted(latest.items(), key=lambda item: item[1][0])
+        ]
 
     def _extract_events(
         self,
@@ -718,16 +770,16 @@ class ResponsePolicyEngine:
 
     def build_from_memories(self, memories: list[MemoryItem]) -> ResponsePolicy:
         policy = ResponsePolicy()
-        active = memories
+        active = resolve_profile_conflicts(memories)
         latest_by_key: dict[str, MemoryItem] = {}
         for item in active:
             current = latest_by_key.get(item.key)
             if current is None or current.valid_from <= item.valid_from:
                 latest_by_key[item.key] = item
 
-        self._apply_preferences(policy, latest_by_key)
-        self._apply_states(policy, latest_by_key)
         self._apply_profile(policy, latest_by_key)
+        self._apply_states(policy, latest_by_key)
+        self._apply_preferences(policy, latest_by_key)
         return policy
 
     def _apply_preferences(
@@ -751,6 +803,7 @@ class ResponsePolicyEngine:
             },
             "decision_preference": {
                 "recommend": ("decision_mode", "give_recommendation", "explicit preference for direct recommendations"),
+                "options": ("decision_mode", "offer_options", "explicit preference for options"),
             },
             "communication_pace": {
                 "slow": ("pace", "slow", "explicit preference for slower pacing"),
@@ -825,6 +878,9 @@ class ResponsePolicyEngine:
         if directness and directness.value == "high" and policy.tone == "balanced":
             policy.tone = "direct_but_warm"
             policy.rationale.append("inferred profile suggests high tolerance for directness")
+        if directness and directness.value == "low" and policy.tone == "balanced":
+            policy.tone = "gentle_and_tactful"
+            policy.rationale.append("current profile guidance favors a tactful tone")
 
         detail = latest_by_key.get("detail_tolerance")
         if detail and detail.value == "low" and policy.detail_level == "medium":

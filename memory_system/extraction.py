@@ -43,7 +43,9 @@ class TurnPreprocessor:
         role: str = "user",
         turn_id: str | None = None,
     ) -> PreprocessedTurn:
-        normalized = re.sub(r"\s+", " ", text).strip()
+        # Keep quote/code line boundaries: flattening Markdown can turn a
+        # quoted preference into a first-person instruction during extraction.
+        normalized = re.sub(r"[^\S\n]+", " ", text).strip()
         return PreprocessedTurn(
             turn_id=turn_id or self._turn_id(normalized, timestamp),
             role=role,

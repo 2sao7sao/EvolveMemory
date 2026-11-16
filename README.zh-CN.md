@@ -2,7 +2,7 @@
 
 # EvolveMemory
 
-**控制 AI 助手记住什么、以及如何使用记忆的本地运行时。**
+**让 AI 在长期相处中形成、修正对人的理解，并自然适配对话的记忆运行时。**
 
 <p align="center">
   <a href="README.md">English</a> ·
@@ -20,16 +20,16 @@
 
 ## 为什么做 EvolveMemory
 
-助手可能检索到正确记忆，却用错方式。EvolveMemory 分开处理候选抽取、写入决策、检索、允许用途与纠错，让每个决定都可以检查。
+长期协作需要的不只是记住事实：助手应逐渐理解稳定偏好、变化与情境，在被纠正后改变，并把理解自然融入回答。EvolveMemory 用可检查的证据、记忆更新与控制来探索这种体验。项目任务续接是首个验证场景，长期协作、陪伴与知己式体验是愿景。
 
 | 能力 | 当前范围 |
 | --- | --- |
-| 治理写入 | 规则抽取与无需真实模型的 LLM payload 校验；支持创建、合并、审核、拒绝或仅保留本轮。 |
-| 控制使用 | 将命中项分配为直接事实、风格策略、追问线索、隐藏约束、澄清、摘要或抑制。 |
-| 纠错与检查 | 本地 JSON / SQLite 存储、审核队列、纠错、删除、全部遗忘和审计导出。 |
-| 复现行为 | 离线回放与确定性回归评估，保留可检查的评分因子。 |
+| 形成与修正理解 | 根据独立来源 turn 自动适配画像，并支持证据更新与纠错；U0 规则/API 切片本地通过，实际体验尚未验收。 |
+| 治理写入 | 规则抽取、外部 LLM payload 校验；创建、合并、按设置审查、拒绝或仅保留本轮。 |
+| 控制用途 | 将记忆编译为事实、风格、事件提示、约束、澄清、摘要或抑制。 |
+| 纠错与复现 | 本地 JSON / SQLite、review、删除、forget-all、审计及确定性回归。 |
 
-项目处于研究原型阶段。生产级 embedding、真实 provider 抽取、宿主对话编排与生产安全尚未完成端到端验证。authority、scope、lifecycle、interaction 等模块已有本地实现，但模块存在不代表所有 API 路径均已完整接通。
+当前是研究原型，使用规则和外部传入的 `llm_payload`，尚未接通真实 provider。2026-11-16 用户取代了“画像确认后才适配”的旧选择：普通偏好证据充分时自动适配，弱证据暂存或不使用，不默认逐条询问。设置、scope、来源有效性与关闭记忆继续生效。完整多轮宿主、广泛的稳定/变化/情境判断和自然体验仍待验证。
 
 ## 快速开始
 
@@ -77,32 +77,34 @@ python -m uvicorn app:app --reload
 | 只做 Python review，明确不要提面试 | 抑制面试信息，保留允许的风格指导。 |
 | 要求不再记住焦虑 | 退役敏感状态及其派生画像信号。 |
 
+这段既有回放使用独立 session runtime；其中追问示例不代表 v2 事件追问已经开启。v2 默认逐事件关闭，详见[v2 接口](docs/runtime-reference.zh-CN.md)。
+
 ```bash
 python examples/replay_adaptive_memory.py
 python -m unittest discover -s tests -p 'test_*.py'
 python -m evals.runner --suite all
 ```
 
-2026-11-16 维护检查在两项定向修复后通过 72 个本地测试和全部 11 个确定性评估套件。范围包含固定案例及 FastAPI TestClient 对 HTTP 处理函数的验证；尚不能证明真实模型帮助程度、大规模检索、生产时延或线上服务可用性。完整证据与修复前失败见[维护记录](docs/maintenance.md)。
+已合并的 [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) 基线通过 115 个本地测试（另有 72 个 pytest subtest）、11 个确定性评估套件、独立 replay 和[远端 CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401)。这些结果属于此前控制/scope 切片，包含如今被取代的画像确认规则。**本轮通过 157 个本地测试（另有 101 个 pytest subtest）、11 个确定性套件与 replay PASS**，使用独立临时数据目录，未调用 provider。实现与远端 Checks 见 [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16)。U0 本地切片完成不等于 U01–U08 实际体验、完整宿主或真实模型效果已验收，详见[维护证据](docs/maintenance.md)。
 
 ## 状态与路线
 
-**建议继续维护，下一里程碑优先保证正确性，并打通一条完整对话路径。**
+**朝长期、可修正的理解推进，先在项目协作中验证。**
 
-| 优先级 | 下一步 | 完成证据 |
+| 阶段 | 下一步 | 完成证据 |
 | --- | --- | --- |
-| P0 | 两条 v2 读路径遵守记忆禁用；迁移测试不依赖真实日期 | 规范化存储、旧会话回退、重新启用及过期边界回归；本次维护已包含。 |
-| P1 | 评审 [Draft PR #12](https://github.com/2sao7sao/EvolveMemory/pull/12)，确定宿主协议 | 明确作用域和对话默认行为，再独立实现并验收首个切片。 |
-| P1 | 在单线程循环中接通作用域、纠错与生命周期检查 | 覆盖旧决定、禁用、过期事件及上下文交付的可回查案例。 |
-| P2 | 引入真实抽取 / embedding provider 并测量 | 有版本的数据集、配置、费用、时延和失败案例。 |
-| P2 | 恢复产品页发布路径 | Pages 部署成功，并独立确认线上 URL。 |
+| U0 — 本地通过 | 证据驱动的自动画像适配 | 规则/API 回归通过；远端发布与用户体验验收分别记录。 |
+| 下一步 S1-a / S0-c | 最小宿主与临时上下文 | 实际交付输入及后续回答遵守当前要求、纠错与既有 scope。 |
+| S1 体验 | 有用的项目任务续接 | 回查旧决定，被纠正后改变，不反复提醒记忆或提及无关旧事。 |
+| S2–S4 | 长期理解与真实 provider 评测 | 区分稳定偏好、持续变化与情境例外，长期测量帮助程度与纠正成本。 |
 
-PR #12 仍是讨论草案，不代表运行时已经交付。最近观察到的该 PR CI 因既有的时钟依赖迁移测试失败；此处的本地修复不等于已重跑或批准该 PR。治理界面、存储与安全等后续工作见[维护状态](docs/maintenance.md)和[下一阶段 Spec](docs/next-development-spec.md)。
+[Draft PR #12](https://github.com/2sao7sao/EvolveMemory/pull/12)记录修正后的方向与剩余协议。首个项目场景不把产品愿景缩减为任务跟踪。愿景、实现与未验证行为的区别见[定位](docs/positioning.md)、[开发路线](docs/next-development-spec.md)和[体验验收 U01–U08](docs/next-development-spec.md#fixed-experience-acceptance)。
 
 ## 文档与素材
 
 | 入口 | 内容 |
 | --- | --- |
+| [对话记忆协议](https://github.com/2sao7sao/EvolveMemory/pull/12) | 自主理解、来源与范围边界、交付捕获和固定体验验收；完整协议尚未完成。 |
 | [运行时参考](docs/runtime-reference.zh-CN.md) | 检索数学、激活、因果相关性、写入治理、Python 与 HTTP 接口。 |
 | [回放说明](examples/adaptive_memory_replay.md) | 输入、输出与固定检查能够证明的范围。 |
 | [维护记录](docs/maintenance.md) | 当前证据、优先级待办及展示素材清单。 |

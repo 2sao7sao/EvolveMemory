@@ -4,6 +4,8 @@
 
 The Memory Use Gate decides how a retrieved memory may influence the current answer. It produces one of seven actions per memory candidate.
 
+Direction update, 2026-11-16: supported ordinary inferred preferences may adapt automatically without per-profile confirmation. Weak evidence stays tentative or unused; the gate should not convert every uncertain impression into a question. Source validity, current settings, scope, and corrections still apply. Exact implementation evidence is in the [runtime reference](runtime-reference.md); the simplified flow below is not a complete authorization or long-term experience model.
+
 ## Actions
 
 ### use_directly
@@ -22,7 +24,7 @@ The memory appears as a visible fact in the response.
 
 The memory shapes tone, structure, or approach without being mentioned.
 
-**Conditions:** Communication preference, style preference, procedural memory.
+**Conditions:** Communication preference, style preference, procedural memory, or an evidence-supported inferred preference within its applicable context and scope. User corrections override older inference; ordinary use need not announce the memory.
 
 **Forbidden:** User explicitly disabled personalization.
 
@@ -34,7 +36,7 @@ The memory shapes tone, structure, or approach without being mentioned.
 
 A short progress question about an open event.
 
-**Conditions:** Open event, strong relevance, not fatigued, cooldown respected.
+**Conditions:** Individually enabled open event, global follow-up allowed, strong relevance, not fatigued, cooldown respected.
 
 **Forbidden:** Unrelated query, user said "don't bring this up", fatigue limit reached.
 
@@ -98,7 +100,8 @@ Retrieved Memory
   → Is never_prompt? → suppress
   → Is expired / deleted? → suppress
   → Is low score (< 0.48)? → suppress
-  → Is inferred profile? → style_only
+  → Is inferred profile with usable evidence and permitted scope/settings? → style_only
+  → Is unsupported inferred profile? → suppress, without default confirmation
   → Is preference? → style_only or hidden_constraint
   → Is sensitive + low relevance? → summarize_only
   → Is open event needing progress? → follow_up

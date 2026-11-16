@@ -11,9 +11,11 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from memory_system.adaptation import resolve_profile_conflicts, without_overridden_styles
 from memory_system.controls import apply_read_controls, settings_allow_record
 from memory_system.governance.scope import ScopeResolver
 from memory_system.events import EventSkillRegistry
+from memory_system.engine import DialogueMemoryExtractor
 from memory_system.extraction import (
     LLMMemoryProposalExtractor,
     LLMProposalValidationError,
@@ -29,10 +31,10 @@ from memory_system.models import (
     MemoryStatus,
     Sensitivity,
 )
-from memory_system.profiles import ProfileAccumulator, ProfileEvidenceExtractor
+from memory_system.profiles import ProfileAccumulator, ProfileEvidenceExtractor, is_user_corrected_profile
 from memory_system.registry import MemorySlotRegistry
 from memory_system.retrieval import HybridMemoryScorer, RetrievalPlan, RetrievalPlanner
-from memory_system.schema import MemoryItem, MemoryType, StateDynamics
+from memory_system.schema import MemoryItem, MemoryType, ResponsePolicy, StateDynamics
 from memory_system.service import SessionMemoryRuntime
 from memory_system.settings import UserMemorySettings
 from memory_system.writing import MemoryOperationPlanner, WritePolicyContext
@@ -74,6 +76,7 @@ class V2IngestOptions(BaseModel):
 
 
 class V2IngestTurnRequest(BaseModel):
+    turn_id: str | None = Field(None, min_length=1, description="Stable host turn ID; reuse on retries so profile evidence is not counted twice.")
     session_id: str | None = None
     project_id: str | None = Field(None, min_length=1)
     domain: str | None = Field(None, min_length=1)
@@ -236,6 +239,8 @@ def settings_from_request(
 ) -> UserMemorySettings:
     payload = existing.to_dict()
     updates = request.model_dump(exclude_unset=True)
+    if updates.get("review_required_for_layers") is not None:
+        payload["review_required_for_layers_explicit"] = True
     for key, value in updates.items():
         if value is None:
             continue
@@ -375,6 +380,12 @@ def query_v2_records(
         event_states=event_states or [],
         timestamp=timestamp,
     )
+    # Current instructions shape this response even when stored memory is off.
+    # This is a bounded rule adapter, not a general language-understanding claim.
+    current_preferences = [item for item in DialogueMemoryExtractor().extract(
+        query_text, source="current-turn", timestamp=timestamp,
+    ) if item.memory_type == MemoryType.PREFERENCE]
+    active = resolve_profile_conflicts(without_overridden_styles(active, current_preferences))
     candidates = [
         score.memory
         for score in HybridMemoryScorer().score(
@@ -386,11 +397,12 @@ def query_v2_records(
     ]
     gate_result = runtime.use_gate.select(query_text, candidates, now=timestamp, limit=limit)
     relevant = gate_result.selected
-    policy = runtime.policy_engine.build_from_memories(relevant)
+    policy = runtime.policy_engine.build_from_memories(relevant + current_preferences)
     compiled_context = runtime.context_compiler.compile(
         query=query_text,
         gate_result=gate_result,
         response_policy=policy,
+        current_preferences=current_preferences,
     )
     return {
         "query": query_text,
@@ -426,7 +438,7 @@ def prompt_context_from_v2_records(
     return runtime.prompt_builder.build(
         query_text,
         memories,
-        runtime.policy_engine.build_from_memories(memories),
+        ResponsePolicy(**query_result["response_policy"]),
         memory_gate=query_result["memory_gate"],
         compiled_context=query_result["compiled_context"],
     )
@@ -473,7 +485,7 @@ def memory_slots() -> dict[str, Any]:
 @app.post("/v2/users/{user_id}/turns/ingest")
 def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]:
     timestamp = normalize_timestamp(request.timestamp)
-    turn_id = f"turn_{uuid4().hex[:12]}"
+    turn_id = request.turn_id or f"turn_{uuid4().hex[:12]}"
     normalized_repository = build_normalized_repository()
     settings = normalized_repository.get_user_settings(user_id)
     preprocessed_turn = TurnPreprocessor().preprocess(
@@ -572,7 +584,8 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
     persisted_active = {record.id: record for record in persisted_records if record.status == MemoryStatus.ACTIVE}
     profile_source_records = []
     for operation in operations:
-        target_id = operation.target_memory_id or operation.candidate.id
+        target_id = (operation.target_memory_id if operation.operation == MemoryOperationType.ADD_EVIDENCE_ONLY
+                     else operation.candidate.id)
         if target_id not in persisted_active or operation.requires_user_review:
             continue
         # Quote this actual user turn, linked to the canonical persisted record.
@@ -599,16 +612,19 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
         if str(evidence.source_memory_id) in allowed_sources
     ] if profile_evidence else []
     profile_candidates = []
-    for hypothesis in ProfileAccumulator().accumulate(evidence_pool):
+    qualified_profile_ids = set()
+    for hypothesis in ProfileAccumulator().accumulate(evidence_pool, now=timestamp):
         record = hypothesis.to_record(user_id=user_id, session_id=request.session_id, observed_at=timestamp)
         record.project_id = request.project_id if scope != "global" else None
         record.domain = request.domain if scope != "global" else None
         record.scope = scope
-        ids = set(hypothesis.evidence_ids)
-        record.metadata["source_memory_ids"] = sorted({str(e.source_memory_id) for e in evidence_pool if e.id in ids})
         profile_candidates.append(record)
+        if hypothesis.autonomous_qualified:
+            qualified_profile_ids.add(record.id)
     profile_operations = MemoryOperationPlanner().plan(
-        profile_candidates, existing_records, WritePolicyContext(settings=settings, scope=temporary_scope),
+        profile_candidates, existing_records, WritePolicyContext(
+            settings=settings, scope=temporary_scope, qualified_profile_ids=frozenset(qualified_profile_ids),
+        ),
     )
     persisted_profile_records = (
         normalized_repository.apply_operations(profile_operations, created_at=timestamp)
@@ -653,6 +669,37 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
     }
 
 
+def revalidate_autonomous_profiles(repository: Any, records: list[MemoryRecord], *,
+                                   user_id: str, timestamp: datetime) -> list[MemoryRecord]:
+    """Reassess automatic guidance at read time without writing from a query."""
+    evidence = repository.list_profile_evidence(user_id=user_id)
+    kept = []
+    for record in records:
+        if (record.layer != MemoryLayer.INFERRED_PROFILE or record.metadata.get("user_review_approved") is True
+                or is_user_corrected_profile(record)):
+            kept.append(record)
+            continue
+        source_ids = {str(source.id) for source in records
+                      if source.layer != MemoryLayer.INFERRED_PROFILE and source.same_scope_as(record)}
+        pool = [item for item in evidence if str(item.source_memory_id) in source_ids
+                and item.observed_at <= timestamp]
+        current = next((item for item in ProfileAccumulator().accumulate(pool, now=timestamp)
+                        if item.autonomous_qualified and item.dimension == record.key and item.value == record.value), None)
+        if current is not None:
+            refreshed = record.model_copy(deep=True)
+            refreshed.confidence = current.confidence
+            refreshed.source_turn_ids = list(current.source_turn_ids)
+            # Internal evidence is refreshed in the response snapshot only.
+            refreshed.metadata.update(current.to_record(
+                user_id=user_id, session_id=record.session_id, observed_at=timestamp,
+            ).metadata)
+            qualification = refreshed.metadata.get("profile_qualification")
+            if isinstance(qualification, dict):
+                qualification["distinct_turn_count"] = len(set(current.source_turn_ids))
+            kept.append(refreshed)
+    return kept
+
+
 def prepare_v2_query(user_id: str, request: V2MemoryQueryRequest) -> tuple[SessionMemoryRuntime, dict[str, Any], dict[str, Any]]:
     timestamp = normalize_timestamp(request.timestamp)
     plan = RetrievalPlanner().plan(request.query, max_prompt_memories=request.options.max_prompt_memories)
@@ -668,10 +715,13 @@ def prepare_v2_query(user_id: str, request: V2MemoryQueryRequest) -> tuple[Sessi
         ), settings)
         # Use the same time snapshot for sources and their derived profiles.
         records = [record for record in records if (record.valid_from <= timestamp and record_to_memory_item(record).is_active(timestamp))]
-        # An approved profile cannot outlive its governed supporting records.
+        # Every profile remains bound to its governed supporting records.
         visible_ids = {str(record.id) for record in records}
         records = [record for record in records if record.layer != MemoryLayer.INFERRED_PROFILE
+                   or is_user_corrected_profile(record)
+                   or record.metadata.get("user_review_approved") is not True
                    or all(source in visible_ids for source in record.metadata.get("source_memory_ids", []))]
+        records = revalidate_autonomous_profiles(repository, records, user_id=user_id, timestamp=timestamp)
         if plan.include_layers:
             records = [record for record in records if record.layer in plan.include_layers]
         visible_ids = {record.id for record in records}
@@ -706,7 +756,7 @@ def v2_prompt_context(user_id: str, request: V2MemoryQueryRequest) -> dict[str, 
     runtime, result, _ = prepare_v2_query(user_id, request)
     memories = [MemoryItem.from_dict(item) for item in result["relevant_memories"]]
     prompt = runtime.prompt_builder.build(
-        request.query, memories, runtime.policy_engine.build_from_memories(memories),
+        request.query, memories, ResponsePolicy(**result["response_policy"]),
         memory_gate=result["memory_gate"], compiled_context=result["compiled_context"],
     )
     return {

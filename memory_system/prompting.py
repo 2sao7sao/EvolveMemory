@@ -46,6 +46,10 @@ class PromptContextBuilder:
                 "Use relevant memories only when they improve helpfulness.",
                 "Do not reveal internal confidence scores or memory system internals unless asked.",
                 "If memory and user query conflict, prioritize the latest user message.",
+                "Blend useful understanding into wording, depth, pacing and help; do not announce remembered preferences or describe the user with profile labels.",
+                "Treat inferred guidance as revisable context, not a fixed identity. Do not ask the user to confirm a profile merely to personalize a response.",
+                "Do not bring up past events or reuse a personal anecdote just to demonstrate memory. Use one only when it adds something needed for the current task.",
+                "When the current message corrects an assumption, adjust naturally; ask only if ambiguity would materially change the help needed now.",
             ]
         )
         user_context = "\n".join(memory_lines) if memory_lines else "- no relevant memory retrieved"

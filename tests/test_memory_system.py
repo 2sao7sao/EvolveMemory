@@ -1583,7 +1583,7 @@ class MemoryApiTest(unittest.TestCase):
         self.assertTrue(second.json()["profile_candidates"])
         self.assertEqual(
             second.json()["profile_operations"][0]["operation"],
-            "ask_user_confirmation",
+            "create",
         )
 
         evidence = self.client.get(f"/v2/users/{user_id}/memory/profile-evidence")
@@ -1591,12 +1591,8 @@ class MemoryApiTest(unittest.TestCase):
         self.assertGreaterEqual(len(evidence.json()["profile_evidence"]), 2)
 
         queue = self.client.get(f"/v2/users/{user_id}/memory/review-queue")
-        self.assertTrue(
-            any(
-                "directness_preference_level" in item["candidate_json"]
-                for item in queue.json()["review_items"]
-            )
-        )
+        self.assertEqual(queue.json()["review_items"], [])
+        self.assertTrue(second.json()["persisted_profile_records"])
 
     def test_v2_review_queue_contains_before_after_diff(self) -> None:
         user_id = f"diff-user-{uuid4().hex}"

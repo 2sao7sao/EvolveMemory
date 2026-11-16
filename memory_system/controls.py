@@ -1,6 +1,7 @@
 """Hard read controls shared by both v2 context endpoints, before scoring."""
 
 from .models import AllowedUse, MemoryLayer, MemoryRecord, Sensitivity
+from .profiles import has_autonomous_profile_qualification, is_user_corrected_profile
 from .settings import UserMemorySettings
 
 
@@ -27,7 +28,11 @@ def apply_read_controls(
         if not settings_allow_record(record, settings):
             continue
         if record.layer == MemoryLayer.INFERRED_PROFILE:
-            if record.metadata.get("user_review_approved") is not True:
+            if (
+                record.metadata.get("user_review_approved") is not True
+                and not has_autonomous_profile_qualification(record)
+                and not is_user_corrected_profile(record)
+            ):
                 continue
         if AllowedUse.NEVER_PROMPT in record.allowed_use:
             continue

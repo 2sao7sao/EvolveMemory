@@ -41,6 +41,7 @@ class ContextCompiler:
         query: str,
         gate_result: MemoryGateResult,
         response_policy: ResponsePolicy,
+        current_preferences: list[MemoryItem] | None = None,
     ) -> CompiledMemoryContext:
         context = CompiledMemoryContext(
             suppressed_count=len(gate_result.suppressed),
@@ -75,6 +76,9 @@ class ContextCompiler:
                 context.style_policy.append(
                     f"Use only as aggregate context, do not mention details: {decision.memory.key}"
                 )
+        for preference in current_preferences or []:
+            context.style_policy.append(self._style_line(preference))
+        context.style_policy = list(dict.fromkeys(context.style_policy))
         return context
 
     def render_prompt_sections(self, context: CompiledMemoryContext, query: str) -> str:
@@ -97,12 +101,37 @@ class ContextCompiler:
             return "Start with the conclusion."
         if memory.key == "detail_preference" and memory.value == "concise":
             return "Keep the response concise."
+        if memory.key == "detail_preference" and memory.value == "detailed":
+            return "Explain in detail, developing the reasoning at a comfortable pace."
+        if memory.key == "directness_preference_level":
+            return ("Answer directly while staying warm." if memory.value == "high" else
+                    "Use a gentle, tactful tone while staying clear.")
+        if memory.key == "detail_tolerance":
+            return ("Keep the response concise." if memory.value == "low" else
+                    "Explain in detail when useful; let the current request set the depth.")
+        if memory.key == "structure_preference_level":
+            return ("Make the answer easy to follow, with a clear main point and connected steps."
+                    if memory.value == "high" else "Use a conversational explanation without imposing a rigid structure.")
+        if memory.key in {"pace_preference", "communication_pace"}:
+            return ("Move through the explanation gradually." if memory.value == "slow" else
+                    "Get to the useful next step promptly.")
+        if memory.key == "decision_style":
+            return ("Offer a concrete recommendation with its reason." if memory.value == "decisive" else
+                    "Offer a small number of meaningful options and explain their tradeoffs.")
+        if memory.key == "decision_preference":
+            return ("Offer a concrete recommendation with its reason." if memory.value == "recommend" else
+                    "Offer a small number of meaningful options and explain their tradeoffs.")
+        if memory.key == "emotional_support_need":
+            return "Respond with patience and warmth without labeling the person's emotional state."
+        if memory.key == "followup_preference" and memory.value == "only_when_blocked":
+            return "Ask a question only when its answer is needed to continue the current task."
         if memory.key == "communication_style" and memory.value == "direct":
             return "Answer directly while staying warm."
         if memory.key == "explanation_structure" and memory.value == "step_by_step":
             return "Use step-by-step structure when explaining."
         if memory.key in {"planning_preference", "planning_orientation"}:
-            return "Prefer checklist-style plans with clear next actions."
+            return ("Explain the strategy before the detailed actions." if memory.value == "strategy_first" else
+                    "Prefer checklist-style plans with clear next actions.")
         if memory.key in {"learning_preference", "learning_style"} and memory.value == "example_first":
             return "Introduce concepts through examples before abstraction."
         if memory.key in {"learning_preference", "learning_style"} and memory.value == "principle_first":
