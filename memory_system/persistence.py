@@ -869,6 +869,7 @@ class NormalizedSQLiteMemoryRepository:
         user_id: str,
         tenant_id: str = "default",
         session_id: str | None = None,
+        now: datetime | None = None,
     ) -> list[MemoryRecord]:
         records = [
             MemoryRecord.from_memory_item(
@@ -877,7 +878,7 @@ class NormalizedSQLiteMemoryRepository:
                 tenant_id=tenant_id,
                 session_id=session_id,
             )
-            for item in store.active_memories()
+            for item in store.active_memories(now=now)
         ]
         for record in records:
             self.upsert_record(record)

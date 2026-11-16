@@ -1,11 +1,9 @@
 name: Deploy Pages
 
+# The repository has no configured Pages site (API 404, checked 2026-11-16).
+# Keep publishing explicit until Settings > Pages is configured for Actions.
+# CI remains automatic; this workflow only controls the optional product page.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:

@@ -617,13 +617,33 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
 
 @app.post("/v2/users/{user_id}/memory/query")
 def v2_memory_query(user_id: str, request: V2MemoryQueryRequest) -> dict[str, Any]:
-    runtime = manager.get(v2_session_key(user_id, request.session_id))
     timestamp = normalize_timestamp(request.timestamp)
     retrieval_plan = RetrievalPlanner().plan(
         request.query,
         max_prompt_memories=request.options.max_prompt_memories,
     )
     repository = build_normalized_repository()
+    if not repository.get_user_settings(user_id).memory_enabled:
+        # Use an empty, non-persistent runtime so neither normalized records nor
+        # the legacy session fallback can contribute memory after opt-out.
+        result = SessionMemoryRuntime().query(
+            request.query, timestamp=timestamp, limit=request.options.max_prompt_memories,
+        )
+        plan_payload = retrieval_plan.to_dict()
+        plan_payload.update(
+            retrieval_modes=[],
+            reasons=["memory_disabled"],
+            max_prompt_memories=request.options.max_prompt_memories,
+            include_debug=request.options.include_debug,
+        )
+        return {
+            "retrieval_plan": plan_payload,
+            "candidates": result["relevant_memories"],
+            "gate": result["memory_gate"],
+            "compiled_context": result["compiled_context"],
+            "response_policy": result["response_policy"],
+        }
+    runtime = manager.get(v2_session_key(user_id, request.session_id))
     all_normalized_records = repository.list_records(
         user_id=user_id,
         session_id=request.session_id,
@@ -678,13 +698,23 @@ def v2_memory_query(user_id: str, request: V2MemoryQueryRequest) -> dict[str, An
 
 @app.post("/v2/users/{user_id}/prompt-context")
 def v2_prompt_context(user_id: str, request: V2MemoryQueryRequest) -> dict[str, Any]:
-    runtime = manager.get(v2_session_key(user_id, request.session_id))
     timestamp = normalize_timestamp(request.timestamp)
     retrieval_plan = RetrievalPlanner().plan(
         request.query,
         max_prompt_memories=request.options.max_prompt_memories,
     )
     repository = build_normalized_repository()
+    if not repository.get_user_settings(user_id).memory_enabled:
+        result = SessionMemoryRuntime().prompt_context(
+            request.query, timestamp=timestamp, limit=request.options.max_prompt_memories,
+        )
+        return {
+            "system_guidance": result["system_prompt"],
+            "memory_context": result["compiled_context"],
+            "response_policy": result["response_policy"],
+            "assembled_prompt": result["assembled_prompt"],
+        }
+    runtime = manager.get(v2_session_key(user_id, request.session_id))
     all_normalized_records = repository.list_records(
         user_id=user_id,
         session_id=request.session_id,
