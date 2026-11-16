@@ -39,7 +39,7 @@ Scope: these changes fix the two reproduced behaviors. They do not implement PR 
 
 The HTTP regressions use FastAPI TestClient. They first verify that default-enabled reads return a preference, then exercise disabling and re-enabling against normalized storage and the legacy-session fallback. They inspect candidate lists, gate output, all compiled memory sections, and the assembled prompt. No model provider was called.
 
-Remote CI for this change and PR #12 must be checked after publication; the local results above do not imply those remote runs have passed.
+The maintenance PR CI passed on 2026-11-16 at `68d12e2`: [hosted CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43888749021). This does not rerun or approve the separate draft PR #12.
 
 ## Next milestones
 
@@ -70,3 +70,7 @@ The baseline's two unreferenced hero PNGs total approximately 3.22 MiB. Keeping 
 ## Brand assets
 
 Both language editions use the same 1600 × 600 hero, shared seated penguin, and project-specific accent and symbol. [Asset inventory and provenance](../assets/brand/README.md). Existing technical figures remain separate from brand artwork.
+
+## Tracked follow-up
+
+[Next milestone / 下一阶段任务 #14](https://github.com/2sao7sao/EvolveMemory/issues/14) contains the actionable checklist. The maintenance PR [hosted CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43888749021) passed on 2026-11-16 at `68d12e2`; historical runtime and provider results retain their original scope.
