@@ -52,12 +52,22 @@ class ProjectRetrievalPlannerTest(unittest.TestCase):
         project = RetrievalPlanner().plan(query, max_prompt_memories=8, project_context=True)
         self.assertIn(MemoryLayer.SEMANTIC_FACT, project.include_layers)
 
-    def test_context_does_not_narrow_general_or_expand_unrelated_style_requests(self):
-        for query in ("继续。", "怎么回答才简洁直接？"):
+    def test_context_does_not_narrow_unrestricted_plans(self):
+        for query in ("继续。", "你记得什么？"):
             with self.subTest(query=query):
                 ordinary = RetrievalPlanner().plan(query, max_prompt_memories=8)
                 project = RetrievalPlanner().plan(query, max_prompt_memories=8, project_context=True)
                 self.assertEqual(project, ordinary)
+
+    def test_explicit_project_context_keeps_facts_when_style_cue_wins(self):
+        query = "名称相同，就直接跳过吗？"
+        ordinary = RetrievalPlanner().plan(query, max_prompt_memories=50)
+        self.assertEqual(ordinary.intent.name, "style_preference")
+        self.assertNotIn(MemoryLayer.SEMANTIC_FACT, ordinary.include_layers)
+        project = RetrievalPlanner().plan(query, max_prompt_memories=50, project_context=True)
+        self.assertEqual(project.intent, ordinary.intent)
+        self.assertTrue({MemoryLayer.SEMANTIC_FACT, MemoryLayer.PROCEDURAL_MEMORY,
+                         MemoryLayer.WORKING_MEMORY}.issubset(project.include_layers))
 
 
 if __name__ == "__main__":

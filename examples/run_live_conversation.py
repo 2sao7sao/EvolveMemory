@@ -133,6 +133,14 @@ def main() -> int:
     provider = RecordedProvider(client, args.output, max_calls=args.max_calls, max_cost=args.max_cost_usd)
     results, errors = [], []
     started = datetime.now(timezone.utc).isoformat()
+    started_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    started_diff = sha256(subprocess.check_output(["git", "diff", "HEAD"], cwd=ROOT)).hexdigest()
+    source_hashes = {str(p.relative_to(ROOT)): sha256(p.read_bytes()).hexdigest()
+                     for p in [ROOT / "app.py", Path(__file__).resolve(), *sorted((ROOT / "memory_system").rglob("*.py"))]}
+    save_json(args.output / "started.json", {"started_at": started, "code_commit": started_commit,
+              "working_tree_diff_sha256": started_diff, "source_hashes": source_hashes,
+              "scenario_sha256": sha256(scenario_bytes).hexdigest(),
+              "rubric_sha256": sha256((ROOT / "docs/live-evaluation-rubric.md").read_bytes()).hexdigest()})
     try:
         for _ in range(100):
             try:
@@ -180,8 +188,9 @@ def main() -> int:
         manifest = {"started_at": started, "finished_at": datetime.now(timezone.utc).isoformat(),
                     "model_requested": args.model, "scenario_sha256": sha256(scenario_bytes).hexdigest(),
                     "rubric_sha256": sha256((ROOT / "docs/live-evaluation-rubric.md").read_bytes()).hexdigest(),
-                    "code_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-                    "working_tree_diff_sha256": sha256(subprocess.check_output(["git", "diff", "HEAD"], cwd=ROOT)).hexdigest(),
+                    "code_commit": started_commit,
+                    "working_tree_diff_sha256": started_diff,
+                    "source_hashes": source_hashes,
                     "history_pairs": 2, "expected_turns": len(turns) if 'turns' in locals() else 0,
                     "completed_replies": sum(x.get("status") == "completed" for x in results), "errors": errors,
                     "provider_calls": provider.calls, "prompt_tokens": provider.prompt_tokens,
@@ -189,7 +198,7 @@ def main() -> int:
                     "estimated_peak_cost_usd": round(provider.estimated_peak_cost_usd, 6),
                     "pricing_source": "https://api-docs.deepseek.com/quick_start/pricing/",
                     "billing_note": "Conservative peak, all input cache-miss estimate; not an account bill. Failed calls may also be billed.",
-                    "synthetic_user_turns": True, "real_provider": True, "expectations_sent_to_model": False}
+                    "synthetic_user_turns": True, "real_provider": provider.calls > 0, "expectations_sent_to_model": False}
         save_json(args.output / "manifest.json", manifest)
         print(json.dumps(manifest, ensure_ascii=False), flush=True)
     return 1 if errors else 0

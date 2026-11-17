@@ -91,6 +91,10 @@ class V2IngestTurnRequest(BaseModel):
 class V2QueryOptions(BaseModel):
     max_prompt_memories: int = Field(8, ge=1, le=50)
     include_debug: bool = False
+    candidate_memory_ids: list[str] | None = Field(
+        None, max_length=50,
+        description="Optional subset of governed visible memories; an empty list selects none.",
+    )
 
 
 class V2MemoryQueryRequest(BaseModel):
@@ -723,6 +727,12 @@ def prepare_v2_query(user_id: str, request: V2MemoryQueryRequest) -> tuple[Sessi
                    or record.metadata.get("user_review_approved") is not True
                    or all(source in visible_ids for source in record.metadata.get("source_memory_ids", []))]
         records = revalidate_autonomous_profiles(repository, records, user_id=user_id, timestamp=timestamp)
+        if request.options.candidate_memory_ids is not None:
+            # A host/model selection may only narrow the fully governed snapshot.
+            # Revalidate profiles against all live sources before this intersection:
+            # choosing a profile need not also place its evidence in the prompt.
+            selected_ids = set(request.options.candidate_memory_ids)
+            records = [record for record in records if str(record.id) in selected_ids]
         if plan.include_layers:
             records = [record for record in records if record.layer in plan.include_layers]
         visible_ids = {record.id for record in records}
