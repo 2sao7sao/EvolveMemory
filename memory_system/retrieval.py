@@ -82,7 +82,9 @@ class QueryIntentClassifier:
 
 
 class RetrievalPlanner:
-    def plan(self, query: str, *, max_prompt_memories: int) -> RetrievalPlan:
+    def plan(
+        self, query: str, *, max_prompt_memories: int, project_context: bool = False,
+    ) -> RetrievalPlan:
         intent = QueryIntentClassifier().classify(query)
         modes = [
             "normalized_sqlite",
@@ -149,6 +151,16 @@ class RetrievalPlanner:
         elif intent.name == "memory_management":
             include_layers = []
             reasons.append("memory-management queries need broad inspection")
+        if project_context and intent.name in {"learning", "decision_support", "code_review"}:
+            # A request to explain, decide or review may depend on the project's
+            # prior decisions and constraints. This only broadens candidate
+            # layers; the caller must still enforce scope/settings before
+            # retrieval, and the use gate decides what reaches the prompt.
+            for layer in (MemoryLayer.SEMANTIC_FACT, MemoryLayer.PROCEDURAL_MEMORY,
+                          MemoryLayer.WORKING_MEMORY):
+                if layer not in include_layers:
+                    include_layers.append(layer)
+            reasons.append("host project context retains factual, procedural and working-memory candidates")
         return RetrievalPlan(
             intent=intent,
             retrieval_modes=modes,

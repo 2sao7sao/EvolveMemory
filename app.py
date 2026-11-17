@@ -702,7 +702,8 @@ def revalidate_autonomous_profiles(repository: Any, records: list[MemoryRecord],
 
 def prepare_v2_query(user_id: str, request: V2MemoryQueryRequest) -> tuple[SessionMemoryRuntime, dict[str, Any], dict[str, Any]]:
     timestamp = normalize_timestamp(request.timestamp)
-    plan = RetrievalPlanner().plan(request.query, max_prompt_memories=request.options.max_prompt_memories)
+    plan = RetrievalPlanner().plan(request.query, max_prompt_memories=request.options.max_prompt_memories,
+                                   project_context=request.project_id is not None)
     repository = build_normalized_repository()
     settings = repository.get_user_settings(user_id)
     runtime = SessionMemoryRuntime()  # Never implicitly load a legacy session.
