@@ -20,7 +20,7 @@ from .models import (
     MemoryRecord,
     MemoryStatus,
 )
-from .profiles import ProfileEvidence
+from .profiles import ProfileEvidence, has_autonomous_profile_qualification, is_user_corrected_profile
 from .models import MemoryLayer
 from .schema import MemoryAuditEvent, MemoryItem
 from .settings import UserMemorySettings
@@ -379,6 +379,14 @@ class NormalizedSQLiteMemoryRepository:
                 existing.valid_to = candidate.valid_to
             else:
                 existing.confidence = max(existing.confidence, candidate.confidence)
+                if candidate.metadata.get("retention") == "state" or candidate.key == "current_bandwidth":
+                    # Repeating a present state renews its observation and expiry;
+                    # the previous observation remains in memory_evidence/audit.
+                    existing.valid_from = candidate.valid_from
+                    existing.valid_to = candidate.valid_to
+                    existing.observed_at = candidate.observed_at
+                    existing.source_text_hash = candidate.source_text_hash
+                    existing.metadata = dict(candidate.metadata)
             existing.source_turn_ids = sorted(
                 set(existing.source_turn_ids + candidate.source_turn_ids)
             )
@@ -410,6 +418,95 @@ class NormalizedSQLiteMemoryRepository:
         for operation in operations:
             records.extend(self.apply_operation(operation, created_at=created_at))
         return records
+
+    def retract_memory_source(
+        self, memory_id: str, *, owner: MemoryRecord, turn_id: str,
+        text: str, evidence: str, reason: str, created_at: datetime,
+    ) -> dict:
+        """Retire a host-reviewed assertion and its automatic dependants atomically.
+
+        The host establishes semantic contradiction. This boundary independently
+        checks source, permission, lifetime and scope; a quote match is not a
+        semantic proof. Historical evidence remains available for audit only.
+        """
+        result = {"memory_id": memory_id, "status": "rejected", "retired_profile_ids": []}
+        if not isinstance(evidence, str) or not evidence.strip() or evidence not in text:
+            return {**result, "reason": "evidence_not_in_current_user_turn"}
+        if not isinstance(reason, str) or not reason.strip():
+            return {**result, "reason": "missing_retraction_reason"}
+        text_hash = sha256(text.encode("utf-8")).hexdigest()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM memory_records WHERE id = ?", (memory_id,)).fetchone()
+            if row is None:
+                return {**result, "reason": "source_unavailable"}
+            source = self._row_to_record(row)
+            if not owner.same_scope_as(source):
+                return {**result, "reason": "source_scope_not_authorized"}
+            settings_row = conn.execute(
+                "SELECT payload_json FROM memory_user_settings WHERE user_id = ?", (owner.user_id,),
+            ).fetchone()
+            settings = (UserMemorySettings.from_dict(json.loads(settings_row[0]))
+                        if settings_row else UserMemorySettings())
+            if not settings.memory_enabled or not settings_allow_record(source, settings):
+                return {**result, "reason": "source_disabled_by_settings"}
+            if source.layer == MemoryLayer.INFERRED_PROFILE:
+                return {**result, "reason": "profile_retraction_requires_source"}
+            if source.layer not in {MemoryLayer.PREFERENCE, MemoryLayer.SEMANTIC_FACT}:
+                return {**result, "reason": "unsupported_retraction_layer"}
+            if source.valid_from > created_at or (source.valid_to is not None and source.valid_to <= created_at):
+                return {**result, "reason": "source_not_current"}
+            previous = source.metadata.get("source_retraction", {})
+            if source.status == MemoryStatus.RETIRED and isinstance(previous, dict) and previous.get("turn_id") == turn_id:
+                if previous.get("text_hash") != text_hash:
+                    return {**result, "reason": "retraction_turn_conflict"}
+                return {**result, "status": "already_retracted", "reason": "same_turn_replay",
+                        "retired_profile_ids": previous.get("retired_profile_ids", [])}
+            if source.status != MemoryStatus.ACTIVE:
+                return {**result, "reason": "source_not_active"}
+            dependants = []
+            for profile_row in conn.execute(
+                "SELECT * FROM memory_records WHERE user_id = ? AND layer = ? AND status = ?",
+                (owner.user_id, MemoryLayer.INFERRED_PROFILE.value, MemoryStatus.ACTIVE.value),
+            ).fetchall():
+                profile = self._row_to_record(profile_row)
+                if (profile.same_scope_as(source) and profile.authority == Authority.ASSISTANT_INFERRED
+                        and has_autonomous_profile_qualification(profile)
+                        and profile.metadata.get("user_review_approved") is not True
+                        and not is_user_corrected_profile(profile)
+                        and memory_id in profile.metadata.get("source_memory_ids", [])):
+                    dependants.append(profile)
+            retired_ids = [str(profile.id) for profile in dependants]
+            cancelled = self._cancel_pending_reviews(
+                conn, user_id=owner.user_id, timestamp=created_at,
+                memory_ids={memory_id, *retired_ids}, reason="source assertion retracted",
+            )
+            for record in [source, *dependants]:
+                before = record.model_dump(mode="json")
+                record.status = MemoryStatus.RETIRED
+                record.metadata["source_retraction"] = {
+                    "turn_id": turn_id, "text_hash": text_hash, "evidence": evidence,
+                    "reason": reason, "source_memory_id": memory_id,
+                    "retired_profile_ids": retired_ids, "cancelled_review_ids": cancelled,
+                }
+                conn.execute(
+                    "UPDATE memory_records SET status = ?, metadata_json = ?, updated_at = ? WHERE id = ?",
+                    (record.status.value, json.dumps(record.metadata, ensure_ascii=False),
+                     created_at.isoformat(), str(record.id)),
+                )
+                conn.execute(
+                    """INSERT INTO memory_audit_events
+                       (id, tenant_id, user_id, actor, action, memory_id, before_json,
+                        after_json, reason, policy_version, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (str(uuid4()), record.tenant_id, record.user_id, "user",
+                     "source_retracted" if record.id == source.id else "derived_profile_retired",
+                     str(record.id), json.dumps(before, ensure_ascii=False),
+                     json.dumps(record.model_dump(mode="json"), ensure_ascii=False), reason,
+                     "source-retraction-v1", created_at.isoformat()),
+                )
+        return {**result, "status": "retired", "reason": "source_assertion_retracted",
+                "retired_profile_ids": retired_ids}
 
     def add_evidence_for_record(
         self,

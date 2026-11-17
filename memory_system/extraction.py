@@ -236,6 +236,13 @@ class LLMMemoryProposalExtractor:
         user_id: str,
         session_id: str | None,
     ) -> MemoryRecord:
+        for field, allowed in {
+            "retention": {"durable", "state", "turn"},
+            "evidence_kind": {"project_fact", "sustained_preference", "contextual_preference",
+                              "behavior_observation", "current_state", "current_task"},
+        }.items():
+            if field in candidate and (not isinstance(candidate[field], str) or candidate[field] not in allowed):
+                raise LLMProposalValidationError(f"candidate {field} has an invalid value.")
         return MemoryRecord(
             user_id=user_id,
             session_id=session_id,
@@ -261,6 +268,8 @@ class LLMMemoryProposalExtractor:
                 "language": turn.language,
                 "memory_command": turn.memory_command.value if turn.memory_command else None,
                 "time_expressions": turn.time_expressions,
+                **{key: candidate[key] for key in
+                   ("retention", "evidence_kind", "applicability", "context") if key in candidate},
             },
         )
 

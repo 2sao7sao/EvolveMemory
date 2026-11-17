@@ -1,0 +1,34 @@
+{
+  "project_id": "synthetic-xiaojing-pilot",
+  "synthetic_notice": "合成修复场景：复制run-04真实生成的错误记忆后继续，不是全新空库；源产物保持不变。",
+  "turns": [
+    {
+      "id": "R25",
+      "session_id": "repair-session-a",
+      "day_offset": 4,
+      "hours_offset": 9,
+      "text": "纠正一下你之前形成的印象：上次两次要短答，分别是赶时间和只写一句按钮文案，不表示我始终偏好短答案，也不能推成认知负荷低。项目评审我需要先有结论，再看主要风险和下一步；讲原理时保留必要解释。不用逐项向我确认。"
+    },
+    {
+      "id": "R26",
+      "session_id": "repair-session-a",
+      "day_offset": 4,
+      "hours_offset": 10,
+      "text": "把保存成功的提示改成一句自然的话。"
+    },
+    {
+      "id": "R27",
+      "session_id": "repair-session-a",
+      "day_offset": 4,
+      "hours_offset": 11,
+      "text": "再把导入失败的按钮文字改一下，只给按钮文字。"
+    },
+    {
+      "id": "R28",
+      "session_id": "repair-session-b",
+      "day_offset": 4,
+      "hours_offset": 12,
+      "text": "继续评审这个方案：为了让纠错快一点，我们直接覆盖旧值，不留原始内容。你怎么看？解释为什么会有问题，以及下一步应该怎么做。"
+    }
+  ]
+}

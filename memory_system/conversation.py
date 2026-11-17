@@ -15,9 +15,10 @@ import httpx
 from .extraction import LLMProposalSchemaValidator, LLMProposalValidationError
 from .providers import ChatClient
 from .registry import MemorySlotRegistry
+from .semantic_review import SEMANTIC_REVIEW_GUIDANCE, apply_semantic_review
 
 
-HOST_VERSION = "project-conversation-v3"
+HOST_VERSION = "project-conversation-v4"
 BASE_GUIDANCE = """你是一位与用户长期协作的项目伙伴。用中文直接回应当前问题，依据已知情况给出有帮助的下一步。
 根据当前任务选择合适的解释深度、节奏和形式，不把用户固定成某种人格。用户最新的说明和纠正优先。
 把理解自然融入回答；不要为了证明记忆而说‘我记得你’，不要重复确认偏好或机械复述背景，也不要把无关旧事当例子。
@@ -31,12 +32,12 @@ EXTRACTION_GUIDANCE = """从当前用户消息抽取可以帮助后续协作的�
 只提取当前用户提供、纠正、选择或表现出来的证据。近期助手回复只是理解指代的背景，不是用户事实，不要将助手建议当成用户已选方案。
 每条 evidence 必须是当前用户文本中的连续原文片段。没有新证据时返回空列表。不要为了每轮有记忆而制造候选。
 项目目标、决定、决定理由、试点范围、阻碍、约束、待办和状态使用 semantic_fact，key 使用简短稳定的 project_<topic> 名称。
-value 是可直接理解的中文陈述；重要决定的理由必须一起保存在 value。优先复用已有记忆的 key 和 exclusive_group，纠正或变化使用同一 key、mutually_exclusive 替代旧值。
+普通项目事实的 value 是中文陈述；枚举偏好和状态必须使用指定英文枚举，不能写中文。重要决定的理由必须一起保存在 value。优先复用已有记忆的 key 和 exclusive_group，纠正或变化使用同一 key、mutually_exclusive 替代旧值。
 不要把提问、假设、引用、否定掉的事情或‘还没做’写成已完成。待办和已完成要明确分开。
 沟通偏好使用下列 slot 的 preference/key/value；可以从对回答的反馈推断，但必须有当前原文证据并用 user_implicit，不能直接自封 inferred_profile。
-常规 preference 的 value 必须严格使用该 slot 的 examples 中的英文值，不得把整段中文写进枚举。current_bandwidth 的 value 只能为 busy/available；细节放 evidence。
+先理解否定和条件；“不是总要X”不能输出偏好X，通常只保留实际肯定的新情境规则。常规 preference 的 value 必须严格使用该 slot 的 examples 中的英文值，不得把整段中文写进枚举。current_bandwidth 的 value 只能为 busy/available；细节放 evidence。
 确实存在情境限定且枚举不能表达的持久偏好，使用 preference、contextual_<context>_preference key 和简短中文条件规则，不能把它扩成所有情境的性格。
-不要保存当前任务的提问、文案要求、回答长度或‘请给一个动作’之类一次性请求。每条输出 retention='durable'/'state'/'turn'；一次性请求必须 turn，宿主不会持久化。明确决定、范围、未完成阻碍和持续偏好才是 durable。
+不要保存当前任务的提问、文案要求、回答长度或‘请给一个动作’之类一次性请求。要求某次用例子/给建议也不代表持久偏好；否定一个概括不能抽为该概括或相反概括的支持。每条输出 retention='durable'/'state'/'turn'；一次性请求必须 turn，宿主不会持久化。明确决定、范围、未完成阻碍和持续偏好才是 durable。
 明确自述/决定用 user_explicit；推断用 user_implicit，confidence 不超过0.75；不要输出 system/external_source 权威。
 当前工作负荷用 semantic_fact/current_bandwidth: busy 或 available，coexistence_rule=mutually_exclusive；短期状态须给含时区 valid_to（从给定对话时间算，通常48小时以内）。
 仅本轮的长度/解释要求不要作为长期偏好保存。不同情境的例外不应覆盖整体偏好。纠正以前的过度概括时，把准确的条件与适用情境保存在 value。
@@ -129,6 +130,10 @@ def validate_grounded_proposals(payload: dict, text: str, timestamp: str) -> tup
             reason = "invalid_retention"
         elif (candidate.get("retention") == "state" or candidate["key"] == "current_bandwidth") and candidate.get("valid_to") is None:
             reason = "transient_state_requires_expiry"
+        elif candidate["key"] in preference_values and candidate["layer"] != "preference":
+            reason = "preference_slot_wrong_layer"
+        elif candidate["key"].startswith("contextual_") and candidate["layer"] != "preference":
+            reason = "contextual_preference_wrong_layer"
         elif candidate["key"] == "current_bandwidth" and candidate["value"] not in ("busy", "available"):
             reason = "invalid_bandwidth_value"
         elif candidate["layer"] == "preference" and not candidate["key"].startswith("contextual_"):
@@ -176,7 +181,7 @@ class ConversationHost:
         if self.memory is not None:
             before = self.memory.query(text, session_id, timestamp, limit=50)
             trace["retrieval_before"] = before
-            summary = [{key: item.get(key) for key in ("key", "value", "authority", "memory_id", "source_turn_ids")}
+            summary = [{key: item.get(key) for key in ("key", "value", "type", "authority", "memory_id", "source_turn_ids")}
                        for item in before.get("model_candidates", [])]
             proposal_schema = LLMProposalSchemaValidator.schema()
             candidate_schema = proposal_schema["properties"]["candidate_memories"]["items"]
@@ -195,10 +200,32 @@ class ConversationHost:
             ], json_mode=True, max_tokens=2200, temperature=0.0)
             trace["extraction"] = result_trace(extraction)
             try:
-                proposals, rejected = validate_grounded_proposals(json.loads(extraction.content), text, timestamp)
+                raw = LLMProposalSchemaValidator().repair_and_validate(json.loads(extraction.content))
             except (ValueError, TypeError, LLMProposalValidationError) as exc:
-                # A bad extraction does not silently become a good memory run.
-                proposals, rejected = {"candidate_memories": []}, [{"reason": "invalid_extraction", "type": type(exc).__name__}]
+                raw = {"candidate_memories": []}
+                trace["extraction_error"] = {"reason": "invalid_extraction", "type": type(exc).__name__}
+            # Independent interpretation sees only this turn and the same safe memory projection.
+            # It can reject false support and retract an old overgeneralization without a user ritual.
+            review = self.provider.complete([
+                {"role": "system", "content": SEMANTIC_REVIEW_GUIDANCE},
+                {"role": "user", "content": json.dumps({"current_user_turn": text,
+                    "timestamp": timestamp, "recent_context": recent,
+                    "existing_assertions": summary,
+                    "proposal_candidates": raw["candidate_memories"][:6]}, ensure_ascii=False, default=str)},
+            ], json_mode=True, max_tokens=2400, temperature=0.0)
+            trace["semantic_review"] = result_trace(review)
+            try:
+                reviewed, semantic_rejected = apply_semantic_review(
+                    raw["candidate_memories"], json.loads(review.content), text=text,
+                    existing_assertions=summary)
+                proposals, rejected = validate_grounded_proposals(reviewed, text, timestamp)
+                if reviewed["memory_retractions"]:
+                    proposals["memory_retractions"] = reviewed["memory_retractions"]
+                rejected = semantic_rejected + rejected
+            except (ValueError, TypeError, LLMProposalValidationError) as exc:
+                proposals, rejected = {"candidate_memories": []}, [{"reason": "invalid_semantic_review", "type": type(exc).__name__}]
+            if "extraction_error" in trace:
+                rejected.insert(0, trace["extraction_error"])
             trace["validated_proposals"] = proposals
             trace["rejected_proposals"] = rejected
             trace["ingest"] = self.memory.ingest(text, session_id, timestamp, turn_id, proposals)

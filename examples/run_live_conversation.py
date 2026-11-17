@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -81,6 +82,9 @@ def render_transcripts(output: Path, scenario: dict, results: list[dict]) -> Non
         if arm == "memory":
             changes = ", ".join(f"{op['operation']}:{op['candidate']['key']}" for op in write_ops) or "无持久化候选"
             lines += [f"记忆写入：`{changes}`", ""]
+            retractions = row.get("ingest", {}).get("memory_retractions", [])
+            if retractions:
+                lines += ["旧断言撤回：" + json.dumps(retractions, ensure_ascii=False), ""]
         cards.append(f'<article data-arm="{arm}"><header>{html.escape(turn_id)} · {arm}</header>'
                      f'<p class="user">{html.escape(row["user_text"])}</p><pre>{html.escape(answer)}</pre>'
                      f'<details><summary>本轮证据</summary><pre>{html.escape(json.dumps({"timestamp": row["timestamp"], "status": row["status"], "model": row.get("answer",{}).get("model"), "source_turns": [x.get("source_turn_ids") for x in row.get("retrieval_after",{}).get("candidates",[])]}, ensure_ascii=False, indent=2))}</pre></details></article>')
@@ -96,12 +100,14 @@ def render_transcripts(output: Path, scenario: dict, results: list[dict]) -> Non
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", type=Path, default=ROOT / "examples/scenarios/project_continuation_zh.json")
+    parser.add_argument("--rubric", type=Path, default=ROOT / "docs/live-evaluation-rubric.md")
+    parser.add_argument("--resume-run", type=Path, help="Copy a prior synthetic run store; preserve its settings, start with empty recent history.")
     parser.add_argument("--api-key-file", type=Path)
     parser.add_argument("--key-index", type=int, default=0)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", default="deepseek-flash")
     parser.add_argument("--max-turns", type=int)
-    parser.add_argument("--max-calls", type=int, default=100)
+    parser.add_argument("--max-calls", type=int, default=150)
     parser.add_argument("--max-cost-usd", type=float, default=2.0)
     args = parser.parse_args()
     if args.model != "deepseek-flash":
@@ -121,6 +127,23 @@ def main() -> int:
     scenario = json.loads(scenario_bytes)
     save_json(args.output / "scenario.json", scenario)
     turns = scenario["turns"][:args.max_turns] if args.max_turns else scenario["turns"]
+    resume_info = None
+    if args.resume_run:
+        resume_manifest = json.loads((args.resume_run / "manifest.json").read_text())
+        resume_scenario = json.loads((args.resume_run / "scenario.json").read_text())
+        resume_export = json.loads((args.resume_run / "memory-export.json").read_text())
+        if resume_manifest.get("synthetic_user_turns") is not True or resume_scenario["project_id"] != scenario["project_id"]:
+            parser.error("Resume requires a prior synthetic run in the same project.")
+        (args.output / "data").mkdir(exist_ok=True)
+        original_db = args.resume_run / "data/memory.sqlite3"
+        # SQLite backup preserves a consistent snapshot; never mutate the earlier evidence.
+        with sqlite3.connect(original_db.resolve().as_uri() + "?mode=ro", uri=True) as source:
+            with sqlite3.connect(args.output / "data/memory.sqlite3") as destination:
+                source.backup(destination)
+        resume_info = {"user_id": resume_export["user_id"],
+                       "source_manifest_sha256": sha256((args.resume_run / "manifest.json").read_bytes()).hexdigest(),
+                       "source_database_sha256": sha256(original_db.read_bytes()).hexdigest(),
+                       "source_code_commit": resume_manifest["code_commit"], "recent_history_restored": False}
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]
     env = {k: v for k, v in os.environ.items() if k != "DEEPSEEK_API_KEY"}
@@ -138,9 +161,9 @@ def main() -> int:
     source_hashes = {str(p.relative_to(ROOT)): sha256(p.read_bytes()).hexdigest()
                      for p in [ROOT / "app.py", Path(__file__).resolve(), *sorted((ROOT / "memory_system").rglob("*.py"))]}
     save_json(args.output / "started.json", {"started_at": started, "code_commit": started_commit,
-              "working_tree_diff_sha256": started_diff, "source_hashes": source_hashes,
+              "working_tree_diff_sha256": started_diff, "source_hashes": source_hashes, "resume": resume_info,
               "scenario_sha256": sha256(scenario_bytes).hexdigest(),
-              "rubric_sha256": sha256((ROOT / "docs/live-evaluation-rubric.md").read_bytes()).hexdigest()})
+              "rubric_sha256": sha256(args.rubric.read_bytes()).hexdigest()})
     try:
         for _ in range(100):
             try:
@@ -149,8 +172,10 @@ def main() -> int:
             if server.poll() is not None: raise RuntimeError("memory_server_exited")
             time.sleep(0.1)
         else: raise RuntimeError("memory_server_start_timeout")
-        gateway = V2MemoryGateway(base, "synthetic-" + uuid4().hex, scenario["project_id"])
-        settings = gateway.enable_project()
+        gateway = V2MemoryGateway(base, resume_info["user_id"] if resume_info else "synthetic-" + uuid4().hex, scenario["project_id"])
+        settings = (gateway._request("GET", gateway.root + "/memory/settings") if resume_info else gateway.enable_project())
+        if resume_info:
+            save_json(args.output / "initial-memory-export.json", gateway.export())
         hosts = {"memory": ConversationHost(provider, memory=gateway),
                  "recent_only": ConversationHost(provider, memory=None)}
         base_time = datetime(2026, 11, 16, tzinfo=timezone.utc)
@@ -187,7 +212,7 @@ def main() -> int:
         render_transcripts(args.output, scenario, results)
         manifest = {"started_at": started, "finished_at": datetime.now(timezone.utc).isoformat(),
                     "model_requested": args.model, "scenario_sha256": sha256(scenario_bytes).hexdigest(),
-                    "rubric_sha256": sha256((ROOT / "docs/live-evaluation-rubric.md").read_bytes()).hexdigest(),
+                    "rubric_sha256": sha256(args.rubric.read_bytes()).hexdigest(),
                     "code_commit": started_commit,
                     "working_tree_diff_sha256": started_diff,
                     "source_hashes": source_hashes,
@@ -198,7 +223,7 @@ def main() -> int:
                     "estimated_peak_cost_usd": round(provider.estimated_peak_cost_usd, 6),
                     "pricing_source": "https://api-docs.deepseek.com/quick_start/pricing/",
                     "billing_note": "Conservative peak, all input cache-miss estimate; not an account bill. Failed calls may also be billed.",
-                    "synthetic_user_turns": True, "real_provider": provider.calls > 0, "expectations_sent_to_model": False}
+                    "resume": resume_info, "synthetic_user_turns": True, "real_provider": provider.calls > 0, "expectations_sent_to_model": False}
         save_json(args.output / "manifest.json", manifest)
         print(json.dumps(manifest, ensure_ascii=False), flush=True)
     return 1 if errors else 0

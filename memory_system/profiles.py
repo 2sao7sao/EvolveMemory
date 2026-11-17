@@ -125,10 +125,25 @@ class ProfileHypothesis:
         )
 
 
+def _profile_source_is_eligible(record: MemoryRecord) -> bool:
+    return (
+        record.scope != "turn"
+        and record.metadata.get("retention") not in {"state", "turn"}
+        and record.metadata.get("evidence_kind") not in {
+            "current_state", "current_task", "contextual_preference",
+        }
+    )
+
+
 class ProfileEvidenceExtractor:
     def extract(self, records: list[MemoryRecord]) -> list[ProfileEvidence]:
         evidence: list[ProfileEvidence] = []
         for record in records:
+            # Current tasks/states and contextual instructions do not establish a
+            # stable personal trait. Session-scoped history without these markers
+            # remains eligible for backward compatibility.
+            if not _profile_source_is_eligible(record):
+                continue
             mapped = self._map_record(record)
             if not mapped:
                 continue
@@ -166,13 +181,11 @@ class ProfileEvidenceExtractor:
             return [
                 ("detail_tolerance", "low", 0.78, "support"),
                 ("detail_tolerance", "high", 0.62, "counter"),
-                ("cognitive_load_preference", "low_load", 0.66, "support"),
             ]
         if record.key == "detail_preference" and record.value == "detailed":
             return [
                 ("detail_tolerance", "high", 0.78, "support"),
                 ("detail_tolerance", "low", 0.62, "counter"),
-                ("cognitive_load_preference", "deep_dive", 0.66, "support"),
             ]
         if record.key in {"response_opening", "explanation_structure"}:
             mapped = [("structure_preference_level", "high", 0.72, "support")]
@@ -205,17 +218,31 @@ class ProfileEvidenceExtractor:
                 ("pace_preference", "slow", 0.72, "support"),
                 ("pace_preference", "fast", 0.55, "counter"),
             ]
-        if record.key == "current_bandwidth" and record.value == "busy":
-            return [
-                ("pace_preference", "fast", 0.48, "support"),
-                ("cognitive_load_preference", "low_load", 0.62, "support"),
-            ]
         if record.key == "current_emotional_state" and record.value in {"anxious", "stressed"}:
             return [
                 ("emotional_support_need", "elevated", 0.52, "support"),
                 ("risk_posture", "risk_averse", 0.42, "support"),
             ]
         return []
+
+
+def is_supported_profile_evidence(evidence: ProfileEvidence, source: MemoryRecord) -> bool:
+    """Validate stored evidence against today's mapping and its actual source.
+
+    Callers still enforce source status, scope authorization, settings and time.
+    Both support and trusted counter observations are valid for a mapped claim;
+    removing a mapping makes old database evidence for that claim ineligible too.
+    """
+    if (
+        not _profile_source_is_eligible(source)
+        or evidence.source_memory_id != source.id
+        or evidence.user_id != source.user_id
+        or evidence.source_key != source.key
+    ):
+        return False
+    claims = {(dimension, value) for dimension, value, _weight, _polarity
+              in ProfileEvidenceExtractor()._map_record(source)}
+    return (evidence.dimension, evidence.value) in claims
 
 
 class ProfileAccumulator:
