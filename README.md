@@ -18,6 +18,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-ff5aa5" alt="MIT license" /></a>
 </p>
 
+**Live-trial update:** [Draft PR #17](https://github.com/2sao7sao/EvolveMemory/pull/17) connects a real DeepSeek host. The 24-turn trial recovered old project decisions but failed preference correction internally; [actual excerpts and remaining P0 defects](https://github.com/2sao7sao/EvolveMemory/blob/feat/live-project-continuation-20261116/docs/live-evaluation-results.md) are separate from rule-test success. PR #17 is not merged; historical no-provider claims below describe the PR #16 baseline.
+
 ## Why EvolveMemory
 
 Long-term collaboration needs more than recalling facts: an assistant should learn stable preferences, recognize change and context, and respond naturally after correction. EvolveMemory explores that experience with inspectable evidence, memory updates, and controls. Project-task continuation is the first test scenario; long-term collaboration and companionship are the vision.

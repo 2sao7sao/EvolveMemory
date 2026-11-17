@@ -18,6 +18,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-ff5aa5" alt="MIT 许可证" /></a>
 </p>
 
+**真实试验更新：**[Draft PR #17](https://github.com/2sao7sao/EvolveMemory/pull/17)已接通真实 DeepSeek 宿主。24轮试验能恢复旧项目决定，但偏好纠正出现内部反向强化；[实际对话与P0缺陷](https://github.com/2sao7sao/EvolveMemory/blob/feat/live-project-continuation-20261116/docs/live-evaluation-results.md)和工程测试结果分开记录。PR #17尚未合并；下文无provider等表述属于PR #16历史基线。
+
 ## 为什么做 EvolveMemory
 
 长期协作需要的不只是记住事实：助手应逐渐理解稳定偏好、变化与情境，在被纠正后改变，并把理解自然融入回答。EvolveMemory 用可检查的证据、记忆更新与控制来探索这种体验。项目任务续接是首个验证场景，长期协作、陪伴与知己式体验是愿景。

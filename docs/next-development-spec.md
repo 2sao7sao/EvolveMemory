@@ -2,6 +2,10 @@
 
 Updated **2026-11-16** after the user's direction correction. The earlier confirmed-only profile decision is superseded: AI should autonomously develop and revise its understanding from evidence, then adapt naturally within existing controls. The new U0 implementation slice passed local checks; implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). PR #15 results describe its earlier baseline.
 
+## 2026-11-16 live-trial update
+
+[Draft PR #17](https://github.com/2sao7sao/EvolveMemory/pull/17) now supplies a bounded real DeepSeek host and completed 24-turn/two-arm trials. It is not merged into main. [Actual results](https://github.com/2sao7sao/EvolveMemory/blob/feat/live-project-continuation-20261116/docs/live-evaluation-results.md): old decisions and the corrected participant scope were recovered, but a negated preference reinforced two incorrect profiles and transient state proposals were rejected. The earlier no-provider/minimal-host statements below describe the PR #16 baseline. Current priority is evidence polarity, temporary-versus-lasting interpretation, and typed state updates; do not restore mandatory profile confirmation. The final live-tested code passed 205 tests/165 subtests and hosted CI, while experience acceptance remains failed/partial. See protocol §13.4 for exact scope.
+
 ## Product direction
 
 The goal is long-term collaboration and companionship in which an AI increasingly understands a person, distinguishes stable preferences from change and context, and reduces repeated explanations. Project-task continuation is the first bounded scenario, not the whole product vision. See [positioning](positioning.md).
