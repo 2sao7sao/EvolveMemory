@@ -105,6 +105,8 @@ python -m evals.runner --suite all
 
 The merged [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) baseline passed 115 local tests (72 pytest subtests), all 11 deterministic suites, the standalone replay, and [hosted CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401). Those results cover the earlier controls/scope implementation, including its now-superseded profile-confirmation rule. The subsequent **PR #16 U0 baseline passed 157 local tests (101 pytest subtests), all 11 deterministic suites, and replay PASS**, using an isolated temporary data directory and no provider; see [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). Those historical checks do not validate the new live host or establish experience acceptance U01–U08. Real-run transcripts and request traces must be assessed separately for useful recall, correction, and natural adaptation. See [maintenance evidence](docs/maintenance.md).
 
+Latest live trial: 24 turns per arm recovered the old decision and corrected participant scope, but a negated preference reinforced an incorrect profile and state fields failed validation. **Project-fact continuation improved; preference correction failed.** The final code passed 205 tests / 165 subtests and all 11 deterministic suites. See [actual excerpts, every run and priority failures](docs/live-evaluation-results.md); engineering checks do not establish experience acceptance.
+
 ## Status and roadmap
 
 **Build toward lasting, revisable understanding; verify it first through project-task collaboration.**

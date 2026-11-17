@@ -105,6 +105,8 @@ python -m evals.runner --suite all
 
 已合并的 [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) 基线通过 115 个本地测试（另有 72 个 pytest subtest）、11 个确定性评估套件、独立 replay 和[远端 CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401)。这些结果属于此前控制/scope 切片，包含如今被取代的画像确认规则。随后 **PR #16 的 U0 基线通过 157 个本地测试（另有 101 个 pytest subtest）、11 个确定性套件与 replay PASS**，使用独立临时数据目录，未调用 provider，见 [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16)。这些历史检查不验证新增真实宿主，也不代表 U01–U08 体验已验收；真实运行的对话与请求记录须单独评估召回、纠错及自然适配，详见[维护证据](docs/maintenance.md)。
 
+最新真实试验：24 轮×两组完整回答，旧决定与纠正后的试点范围可恢复，但偏好否定被误读并形成错误画像，状态字段也未正确写入。**项目事实续接有收益，偏好纠正未通过**。最终代码通过 205 tests / 165 subtests 与 11 个确定性套件；[实际对话节选、全部试验结果和优先缺陷](docs/live-evaluation-results.md)单独记录，不能用工程测试代替体验验收。
+
 ## 状态与路线
 
 **朝长期、可修正的理解推进，先在项目协作中验证。**
