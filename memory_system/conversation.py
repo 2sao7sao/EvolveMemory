@@ -18,7 +18,7 @@ from .registry import MemorySlotRegistry
 from .semantic_review import SEMANTIC_REVIEW_GUIDANCE, RETRACTION_REVIEW_GUIDANCE, apply_semantic_review, verify_retractions
 
 
-HOST_VERSION = "project-conversation-v5"
+HOST_VERSION = "project-conversation-v6"
 BASE_GUIDANCE = """你是一位与用户长期协作的项目伙伴。用中文直接回应当前问题，依据已知情况给出有帮助的下一步。
 根据当前任务选择合适的解释深度、节奏和形式，不把用户固定成某种人格。用户最新的说明和纠正优先。
 把理解自然融入回答；不要为了证明记忆而说‘我记得你’，不要重复确认偏好或机械复述背景，也不要把无关旧事当例子。
@@ -242,7 +242,7 @@ class ConversationHost:
                         retraction_review = self.provider.complete([
                             {"role": "system", "content": RETRACTION_REVIEW_GUIDANCE},
                             {"role": "user", "content": json.dumps({"current_user_turn": text,
-                                "retraction_proposals": proposed_retractions}, ensure_ascii=False)},
+                                "assertions_to_compare": [{"memory_id": item["memory_id"], "assertion": item["assertion"]} for item in proposed_retractions]}, ensure_ascii=False)},
                         ], json_mode=True, max_tokens=1400, temperature=0.0)
                         trace["retraction_review"] = result_trace(retraction_review)
                         try:
@@ -250,7 +250,7 @@ class ConversationHost:
                         except (ValueError, TypeError):
                             retraction_verdict = {}
                         approved_retractions, retraction_rejected = verify_retractions(
-                            proposed_retractions, retraction_verdict)
+                            proposed_retractions, retraction_verdict, text=text)
                         if approved_retractions:
                             proposals["memory_retractions"] = approved_retractions
                         rejected += retraction_rejected

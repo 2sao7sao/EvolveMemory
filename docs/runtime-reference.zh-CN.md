@@ -427,10 +427,10 @@ runner 自行启动仅监听 loopback 的 API，使用新的合成用户并明�
 同值状态重报会更新有效期。状态、一次任务和情境规则不晋升为稳定画像；简短偏好不再推成认知负荷，忙碌不再推成稳定画像，旧库中这些被移除映射的证据也不能重新授予画像资格。未带新标记的legacy payload维持原兼容契约，并未自动完成语义复核。撤源和自动依赖退役事务原子化，不代表整个ingest或模型生成流程原子化。
 
 
-### Live host correction semantics (v5)
+### 实时宿主纠正语义（v6）
 
-The host distinguishes the exact allowed assertion from its rendered style policy during semantic review. Before an explicit source retraction it requests a separate contradiction verdict; compatible, missing, duplicate, malformed or uncertain verdicts leave the source active. An invalid extraction cannot initiate a retraction. Valid replacement project facts use normal governed supersession rather than retiring the old fact before validating the replacement.
+语义复核区分获准读取的精确断言与渲染后的风格建议。显式撤回还须经过独立的矛盾判定，只给原始断言与当前用户原文，不传上一复核器的解释；两侧证据片段都须逐字核对。相容、缺失、重复、格式错误或不确定的判定不撤回旧来源。抽取失败不能发起撤回。项目事实的有效替换走正常受控 supersession，不能在验证新值前先退役旧事实。
 
-Project decisions, scope and progress may use `retention=until_changed`: they remain current until superseded, with no guessed deadline. Busy/available remains a typed expiring state, and it does not automatically dictate answer length, order or pace. The independent legacy session profile-inference mappings are outside this host change.
+项目决定、范围和进展可使用 `retention=until_changed`：新信息替代前保持有效，不虚构到期时间。busy/available 仍是有到期时间的状态，只用于容量规划，不自动决定回答长度、顺序或节奏。独立旧 session runtime 的画像推断映射不属于本次实时宿主改动。
 
-When a fixed preference enum cannot represent a user's explicitly stated positive correction, semantic review may retain an exact current-text rule under a `contextual_` key. It cannot derive the opposite preference from negation alone. These model judgments remain fallible; the unit contracts do not prove semantic correctness.
+固定枚举不能表达用户明确提出的正向新规则时，语义复核可以在 `contextual_` key 下保留当前原文规则，不能仅凭否定推出相反偏好。这仍是可能出错的模型判断，单元契约不证明语义正确。

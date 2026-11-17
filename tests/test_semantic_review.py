@@ -99,29 +99,30 @@ class SemanticReviewTest(unittest.TestCase):
 
 
 class CorrectionVerificationTest(unittest.TestCase):
-    def test_only_explicit_per_id_contradiction_can_retire_a_known_assertion(self):
+    def test_only_grounded_per_id_contradiction_can_retire_a_known_assertion(self):
         proposal = {"memory_id": "old", "evidence": "new rule", "reason": "change",
                     "assertion": {"key": "communication_style", "value": "direct"}}
-        for relation in ("compatible", "uncertain", None):
-            with self.subTest(relation=relation):
-                accepted, rejected = verify_retractions([proposal], {"decisions": [
-                    {"memory_id": "old", "relation": relation},
-                    {"memory_id": "unknown", "relation": "contradicts"}]})
-                self.assertEqual(accepted, [])
-                self.assertEqual(len(rejected), 1)
-        accepted, rejected = verify_retractions([proposal], {"decisions": [{"memory_id": "old", "relation": "contradicts"}]})
+        verdict = {"memory_id": "old", "relation": "contradicts", "old_span": "direct", "new_span": "new rule"}
+        accepted, rejected = verify_retractions([proposal], {"decisions": [verdict]}, text="new rule")
         self.assertEqual(accepted, [{"memory_id": "old", "evidence": "new rule", "reason": "change"}])
         self.assertEqual(rejected, [])
+        for changes in ({"relation": "compatible"}, {"relation": "uncertain"}, {"old_span": "invented claim"},
+                        {"old_span": ""}, {"new_span": "absent quote"}, {"new_span": ""}, {"memory_id": "unknown"}):
+            with self.subTest(changes=changes):
+                accepted, rejected = verify_retractions([proposal], {"decisions": [{**verdict, **changes}]}, text="new rule")
+                self.assertEqual(accepted, [])
+                self.assertEqual(len(rejected), 1)
 
     def test_missing_malformed_duplicate_or_policy_only_is_not_verified(self):
         proposal = {"memory_id": "old", "evidence": "correction", "reason": "change",
                     "assertion": {"key": "detail_preference", "value": "concise"}}
-        verdict = {"memory_id": "old", "relation": "contradicts"}
-        for review in ({}, None, {"decisions": "bad"}, {"decisions": [verdict, verdict]}):
+        verdict = {"memory_id": "old", "relation": "contradicts", "old_span": "concise", "new_span": "correction"}
+        for review in ({}, None, {"decisions": "bad"}, {"decisions": [verdict, verdict]},
+                       {"decisions": [{"memory_id": "old", "relation": "contradicts"}]}):
             with self.subTest(review=review):
-                self.assertEqual(verify_retractions([proposal], review)[0], [])
+                self.assertEqual(verify_retractions([proposal], review, text="correction")[0], [])
         proposal.pop("assertion")
-        self.assertEqual(verify_retractions([proposal], {"decisions": [verdict]})[0], [])
+        self.assertEqual(verify_retractions([proposal], {"decisions": [verdict]}, text="correction")[0], [])
 
     def test_project_stage_can_be_reclassified_without_guessing_expiration(self):
         candidate = proposal("project_scope", "仅我自己试用", layer="semantic_fact", retention="state", valid_to="2026-11-18T00:00:00Z", validity={"valid_to": "2026-11-18T00:00:00Z"})

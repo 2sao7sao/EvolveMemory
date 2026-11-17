@@ -444,9 +444,9 @@ Use `--resume-run /private/prior-run` with a same-project synthetic scenario to 
 State observations renew their expiry on same-value updates. State/task/contextual signals cannot promote stable profiles. Short answers no longer imply cognitive load, and being busy no longer implies a stable profile; old evidence for those removed mappings is excluded from read-time qualification. Unmarked legacy payloads retain the earlier compatibility contract and are not retroactively semantically verified. Exact source retraction is atomic; the whole ingest/model-generation flow is not.
 
 
-### Live host correction semantics (v5)
+### Live host correction semantics (v6)
 
-The host distinguishes the exact allowed assertion from its rendered style policy during semantic review. Before an explicit source retraction it requests a separate contradiction verdict; compatible, missing, duplicate, malformed or uncertain verdicts leave the source active. An invalid extraction cannot initiate a retraction. Valid replacement project facts use normal governed supersession rather than retiring the old fact before validating the replacement.
+The host distinguishes the exact allowed assertion from its rendered style policy during semantic review. Before an explicit source retraction it requests a separate contradiction verdict using only the exact assertions and current turn, without the first reviewer’s explanations. Both sides require exact quoted spans; compatible, missing, duplicate, malformed or uncertain verdicts leave the source active. An invalid extraction cannot initiate a retraction. Valid replacement project facts use normal governed supersession rather than retiring the old fact before validating the replacement.
 
 Project decisions, scope and progress may use `retention=until_changed`: they remain current until superseded, with no guessed deadline. Busy/available remains a typed expiring state, and it does not automatically dictate answer length, order or pace. The independent legacy session profile-inference mappings are outside this host change.
 

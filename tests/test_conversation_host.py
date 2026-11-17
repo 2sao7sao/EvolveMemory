@@ -28,11 +28,13 @@ class FakeProvider:
         self.calls.append(request)
         if options.get("json_mode"):
             payload = json.loads(messages[-1]["content"])
-            if "retraction_proposals" in payload:
+            if "assertions_to_compare" in payload:
                 result = self.retraction_review if self.retraction_review is not None else {
                     "decisions": [{"memory_id": item["memory_id"], "relation": "contradicts",
-                                   "reason": "fake independent contradiction check"}
-                                  for item in payload["retraction_proposals"]]}
+                                   "reason": "fake independent contradiction check",
+                                   "old_span": str(item["assertion"]["value"]),
+                                   "new_span": payload["current_user_turn"]}
+                                  for item in payload["assertions_to_compare"]]}
             elif "proposal_candidates" in payload:
                 result = self.semantic_review if self.semantic_review is not None else {
                     "decisions": [{"candidate_index": i, "relation": "supports",
@@ -176,7 +178,7 @@ class ConversationHostTest(unittest.TestCase):
         self.assertEqual(payload.get("memory_retractions", []), [])
         self.assertIn("evidence_not_in_current_user_turn", [item["reason"] for item in trace["rejected_proposals"]])
         self.assertIn("replacement_uses_governed_supersession", [item["reason"] for item in trace["rejected_proposals"]])
-        self.assertEqual(self.json_calls(provider, "retraction_proposals"), [])
+        self.assertEqual(self.json_calls(provider, "assertions_to_compare"), [])
         self.assertEqual(memory.candidates, [old])
 
     def test_failed_independent_retraction_review_preserves_valid_new_fact(self):
@@ -209,10 +211,12 @@ class ConversationHostTest(unittest.TestCase):
                 self.assertEqual(payload.get("memory_retractions", []), [])
                 self.assertEqual(trace["status"], "completed")
                 self.assertTrue(trace["rejected_proposals"])
-                sent = self.json_calls(provider, "retraction_proposals")[0]
-                self.assertEqual(sent["retraction_proposals"][0]["assertion"],
+                sent = self.json_calls(provider, "assertions_to_compare")[0]
+                self.assertEqual(sent["assertions_to_compare"][0]["assertion"],
                                  {"key": "detail_preference", "value": "concise"})
                 self.assertNotIn("Keep the response concise.", json.dumps(sent))
+                self.assertEqual(set(sent["assertions_to_compare"][0]), {"memory_id", "assertion"})
+                self.assertNotIn("prior preference may be too broad", json.dumps(sent))
 
     def test_invalid_raw_extraction_cannot_erase_existing_project_fact(self):
         text = "第一轮改为仅本人试用。"

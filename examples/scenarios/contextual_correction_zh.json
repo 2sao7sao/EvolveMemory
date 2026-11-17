@@ -1,0 +1,121 @@
+{
+  "schema_version": "heldout-conversation-v1",
+  "scenario_id": "heldout-correction-2026-11-16-v1",
+  "project_id": "synthetic-paperbridge-checkout",
+  "synthetic_notice": "全部用户文本、项目名称、状态与安排均为合成内容，不代表真实个人资料。助手回复必须由待测模型生成，不预填、不修饰。",
+  "clock_origin": "2026-11-16T00:00:00+00:00",
+  "turns": [
+    {
+      "id": "H01",
+      "session_id": "heldout-a",
+      "day_offset": 0,
+      "hours_offset": 9,
+      "text": "我们做一个叫“纸桥借物台”的社区工具借还小试点，先只管折叠梯和扭矩扳手。交接方式我定为双联纸质交接单，不用扫码登记：库房金属门关上后手机信号不稳，而且值班员要留一联。首版先不做押金收款，也不做自动逾期催还。先帮我指出这个边界有没有明显遗漏。"
+    },
+    {
+      "id": "H02",
+      "session_id": "heldout-a",
+      "day_offset": 0,
+      "hours_offset": 10,
+      "text": "平时和我讨论问题，请直截了当地说出问题，不用先缓冲或夸一段。学新概念时，我习惯先看一个小例子，再把原理和推导讲透，别为了省字跳过因果。先用这个方式讲讲什么叫状态机。"
+    },
+    {
+      "id": "H03",
+      "session_id": "heldout-a",
+      "day_offset": 0,
+      "hours_offset": 11,
+      "text": "以后发现我的设想有问题，也这样直接指出就行，不用替我留面子。刚才学习部分先有例子、再解释为什么成立的顺序适合我，今后介绍新概念继续这样。现在说说状态和事件怎么分。"
+    },
+    {
+      "id": "H04",
+      "session_id": "heldout-a",
+      "day_offset": 0,
+      "hours_offset": 12,
+      "text": "工作方案评审有另一种习惯：先告诉我能不能推进，再挑一两处最关键的缺口就好，不展开成教程。学知识仍然照前面那种讲透的方式。这是两种场景，不要互相覆盖。现在评审一下“工具归还后直接上架，不检查是否损坏”这个流程。"
+    },
+    {
+      "id": "H05",
+      "session_id": "heldout-a",
+      "day_offset": 0,
+      "hours_offset": 13,
+      "text": "工作评审保持这种短结论加关键问题的格式，别因为我学习时想听原理，就在每次评审里加教学段落。再看一个设计：工具标签只写名称，没有独立编号，有问题吗？"
+    },
+    {
+      "id": "H06",
+      "session_id": "heldout-a",
+      "day_offset": 0,
+      "hours_offset": 14,
+      "text": "接下来36小时我会很忙，每天只能留二十分钟给这个试点。先按这个临时投入量给我排一步。这个忙碌状态不是以后一直如此。"
+    },
+    {
+      "id": "H07",
+      "session_id": "heldout-a",
+      "day_offset": 0,
+      "hours_offset": 15,
+      "text": "我马上进电梯，这条只用一句短话告诉我“归还待检查”是什么意思。"
+    },
+    {
+      "id": "H08",
+      "session_id": "heldout-b",
+      "day_offset": 1,
+      "hours_offset": 8,
+      "text": "今天继续。幂等和去重有什么区别？"
+    },
+    {
+      "id": "H09",
+      "session_id": "heldout-b",
+      "day_offset": 1,
+      "hours_offset": 9,
+      "text": "评审这份借物台流程：工具在外借期间仍显示为可借，归还按钮统一写“确定”，是否超期只靠颜色表示。"
+    },
+    {
+      "id": "H10",
+      "session_id": "heldout-b",
+      "day_offset": 1,
+      "hours_offset": 10,
+      "text": "更新一下我的沟通要求。我之前说不用缓冲、直接挑错，现在不想一直用那种方式了。以后先用一句话说明哪里合理，再温和而明确地指出问题；别因为旧要求就继续硬邦邦地下判断。这是之后的默认沟通方式，不只针对这一条。工作评审仍然短一点，学习新概念仍然先例子再讲透。"
+    },
+    {
+      "id": "H11",
+      "session_id": "heldout-b",
+      "day_offset": 1,
+      "hours_offset": 11,
+      "text": "还有，原先占时间的安排提前结束了，从现在起我每天能给试点一小时半，已经恢复正常投入。请把之前每天二十分钟的忙碌状态替换掉，不要等那36小时结束再改。"
+    },
+    {
+      "id": "H12",
+      "session_id": "heldout-b",
+      "day_offset": 1,
+      "hours_offset": 12,
+      "text": "帮我拟一份空白检查记录，只要“编号、检查结果、处理动作”三个栏目，不填任何实际记录。"
+    },
+    {
+      "id": "H13",
+      "session_id": "heldout-c",
+      "day_offset": 1,
+      "hours_offset": 18,
+      "text": "接着评审借物台方案：待检查和可出借共用一个状态，值班员可以直接覆盖上一位的检查结果，历史修改不留痕迹。"
+    },
+    {
+      "id": "H14",
+      "session_id": "heldout-c",
+      "day_offset": 1,
+      "hours_offset": 19,
+      "text": "另一个知识点：轮询和事件驱动有什么区别，为什么有的系统会同时用这两种？"
+    },
+    {
+      "id": "H15",
+      "session_id": "heldout-c",
+      "day_offset": 1,
+      "hours_offset": 20,
+      "text": "给借物台打印一个六字按钮文案，表示已经归还、等待检查，只输出文案。"
+    },
+    {
+      "id": "H16",
+      "session_id": "heldout-c",
+      "day_offset": 1,
+      "hours_offset": 21,
+      "text": "现在继续推进试点。先回顾最初定下的交接方式和选择理由，以及首版哪些功能先不做，再按我目前的投入节奏安排接下来两天的动作。拿不准的旧决定别猜。"
+    }
+  ]
+}
