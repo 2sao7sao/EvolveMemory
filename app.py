@@ -757,6 +757,7 @@ def v2_memory_query(user_id: str, request: V2MemoryQueryRequest) -> dict[str, An
     _, result, plan = prepare_v2_query(user_id, request)
     return {
         "retrieval_plan": plan, "candidates": result["relevant_memories"],
+        "model_candidates": result["compiled_context"]["source_notes"],
         "gate": result["memory_gate"], "compiled_context": result["compiled_context"],
         "response_policy": result["response_policy"],
     }

@@ -17,7 +17,7 @@ from .providers import ChatClient
 from .registry import MemorySlotRegistry
 
 
-HOST_VERSION = "project-conversation-v2"
+HOST_VERSION = "project-conversation-v3"
 BASE_GUIDANCE = """你是一位与用户长期协作的项目伙伴。用中文直接回应当前问题，依据已知情况给出有帮助的下一步。
 根据当前任务选择合适的解释深度、节奏和形式，不把用户固定成某种人格。用户最新的说明和纠正优先。
 把理解自然融入回答；不要为了证明记忆而说‘我记得你’，不要重复确认偏好或机械复述背景，也不要把无关旧事当例子。
@@ -125,7 +125,7 @@ def validate_grounded_proposals(payload: dict, text: str, timestamp: str) -> tup
             reason = "profile_requires_governed_evidence_accumulation"
         elif candidate.get("retention") == "turn":
             reason = "turn_only_not_stored"
-        elif candidate.get("retention", "durable") not in ("durable", "state"):
+        elif candidate.get("retention") not in ("durable", "state"):
             reason = "invalid_retention"
         elif (candidate.get("retention") == "state" or candidate["key"] == "current_bandwidth") and candidate.get("valid_to") is None:
             reason = "transient_state_requires_expiry"
@@ -177,7 +177,7 @@ class ConversationHost:
             before = self.memory.query(text, session_id, timestamp, limit=50)
             trace["retrieval_before"] = before
             summary = [{key: item.get(key) for key in ("key", "value", "authority", "memory_id", "source_turn_ids")}
-                       for item in before["candidates"]]
+                       for item in before.get("model_candidates", [])]
             proposal_schema = LLMProposalSchemaValidator.schema()
             candidate_schema = proposal_schema["properties"]["candidate_memories"]["items"]
             candidate_schema["properties"]["retention"] = {"enum": ["durable", "state", "turn"]}
@@ -206,7 +206,7 @@ class ConversationHost:
             trace["selection_pool"] = pool
             candidates = [{key: item.get(key) for key in
                            ("memory_id", "key", "value", "type", "authority", "evidence", "source_turn_ids", "valid_from", "valid_to")}
-                          for item in pool["candidates"]]
+                          for item in pool.get("model_candidates", [])]
             selected_ids: list[str] = []
             if candidates:
                 selection = self.provider.complete([
@@ -227,12 +227,13 @@ class ConversationHost:
             trace["retrieval_after"] = self.memory.query(text, session_id, timestamp, limit=12, candidate_memory_ids=selected_ids)
             context = self.memory.prompt(text, session_id, timestamp, candidate_memory_ids=selected_ids)
             trace["compiled_prompt"] = context
-            system += "\n\n" + context["system_guidance"]
             # Deliver exactly the context compiled by the governed memory API.
             # Raw history/audit exports and evaluation expectations are never delivered.
             system += "\n\n[受控记忆上下文]\n" + context["assembled_prompt"]
-            provenance = [{key: item.get(key) for key in ("key", "authority", "source_turn_ids", "evidence")}
-                          for item in trace["retrieval_after"]["candidates"]]
+            # Same final gate snapshot as the actual prompt; never re-add query/audit evidence.
+            provenance = [{key: item.get(key) for key in
+                           ("memory_id", "key", "value", "use_action", "authority", "source_turn_ids", "evidence")}
+                          for item in context.get("memory_context", {}).get("source_notes", [])]
             system += "\n\n[所用记忆的来源，仅用于核对，不必逐条复述]\n" + json.dumps(provenance, ensure_ascii=False)
             system += "\nuser_explicit 表示用户明确表述；user_implicit/assistant_inferred 是推断。回答来源问题时依实际证据区分，不要把明确纠正误说成自己的猜测。"
         messages = [{"role": "system", "content": system}, *recent, {"role": "user", "content": text}]

@@ -27,11 +27,12 @@
 | 能力 | 当前范围 |
 | --- | --- |
 | 形成与修正理解 | 根据独立来源 turn 自动适配画像，并支持证据更新与纠错；U0 规则/API 切片本地通过，实际体验尚未验收。 |
-| 治理写入 | 规则抽取、外部 LLM payload 校验；创建、合并、按设置审查、拒绝或仅保留本轮。 |
+| 治理写入 | 规则抽取或真实模型提案，通过 `llm_payload` 校验；创建、合并、按设置审查、拒绝或仅保留本轮。 |
 | 控制用途 | 将记忆编译为事实、风格、事件提示、约束、澄清、摘要或抑制。 |
 | 纠错与复现 | 本地 JSON / SQLite、review、删除、forget-all、审计及确定性回归。 |
+| 真实对话验证 | 有限历史窗口的 DeepSeek 宿主，记录实际请求、回答与记忆决策，并保留近期上下文对照组。 |
 
-当前是研究原型，使用规则和外部传入的 `llm_payload`，尚未接通真实 provider。2026-11-16 用户取代了“画像确认后才适配”的旧选择：普通偏好证据充分时自动适配，弱证据暂存或不使用，不默认逐条询问。设置、scope、来源有效性与关闭记忆继续生效。完整多轮宿主、广泛的稳定/变化/情境判断和自然体验仍待验证。
+当前研究原型已包含真实 DeepSeek provider 和有限历史窗口的多轮宿主，同时保留离线规则运行时。2026-11-16 用户取代了“画像确认后才适配”的旧选择：普通偏好证据充分时自动适配，弱证据暂存或不使用，不默认逐条询问。设置、scope、来源有效性与关闭记忆继续生效。真实模型项目续接正在评估；广泛的稳定/变化/情境判断和自然体验尚未验收。
 
 ## 快速开始
 
@@ -56,6 +57,21 @@ python -m uvicorn app:app --reload
 
 在 `http://127.0.0.1:8000/docs` 查看接口。SQLite 配置与 Python 用法见[运行时参考](docs/runtime-reference.zh-CN.md#developer-surface)。
 
+### 真实 DeepSeek 对话
+
+安装依赖后，可运行 24 轮**合成用户脚本 + 真实 `deepseek-flash` 回答**。脚本会自行启动本地 API，对比记忆组与仅近期上下文组：
+
+```bash
+python examples/run_live_conversation.py \
+  --api-key-file /absolute/private/path/deepseek-key.txt \
+  --model deepseek-flash \
+  --output data/live-runs/run-01
+```
+
+指向已有私有密钥文件，不把密钥复制进仓库或命令文本。输出目录必须不存在或为空。默认限制为 **100 次逻辑 provider 调用**与 **2 美元估算费用保护**，不等于 provider 账单硬上限；重试和失败调用也可能收费。这条命令会发起付费外部模型调用。可选参数、边界与产物见[真实运行契约](docs/runtime-reference.zh-CN.md#live-deepseek-conversation)。
+
+运行后打开 `data/live-runs/run-01/transcript.html` 或 `transcript.md`。逐轮 JSON、`provider_calls.jsonl` 和 `manifest.json` 保留实际交付上下文、原始回答、失败、用量与费用估算。运行完成只证明执行过，不代表自然理解已通过验收。
+
 ## 工作流程
 
 ```text
@@ -66,7 +82,7 @@ python -m uvicorn app:app --reload
 
 <img src="assets/runtime_contract_map_v2.svg" alt="记忆运行模式：观察、写入、检索、适配、纠错与审计" width="100%" />
 
-使用门控决定什么可以进入 Prompt；检索分数本身不授予使用权限。当前语义评分使用确定性哈希 embedding 替身。详见[评分与接口](docs/runtime-reference.zh-CN.md)、[门控规则](docs/gate-decision-rules.md)和[架构方案](docs/next-development-spec.md)。
+使用门控决定什么可以进入 Prompt；检索分数本身不授予使用权限。真实宿主只保留最近两组用户/助手对话，切换 session 时清空；抽取候选并校验证据与保留期限，经 v2 治理写入后获取最多 50 条受控候选，让模型选择最多 10 个 ID，再通过同一查询与 Prompt 治理路径复核后回答。这不读取过去会话全文；初始候选排序仍使用确定性哈希 embedding 替身。详见[评分与接口](docs/runtime-reference.zh-CN.md)、[门控规则](docs/gate-decision-rules.md)和[架构方案](docs/next-development-spec.md)。
 
 ## 复现实例
 
@@ -87,7 +103,7 @@ python -m unittest discover -s tests -p 'test_*.py'
 python -m evals.runner --suite all
 ```
 
-已合并的 [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) 基线通过 115 个本地测试（另有 72 个 pytest subtest）、11 个确定性评估套件、独立 replay 和[远端 CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401)。这些结果属于此前控制/scope 切片，包含如今被取代的画像确认规则。**本轮通过 157 个本地测试（另有 101 个 pytest subtest）、11 个确定性套件与 replay PASS**，使用独立临时数据目录，未调用 provider。实现与远端 Checks 见 [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16)。U0 本地切片完成不等于 U01–U08 实际体验、完整宿主或真实模型效果已验收，详见[维护证据](docs/maintenance.md)。
+已合并的 [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) 基线通过 115 个本地测试（另有 72 个 pytest subtest）、11 个确定性评估套件、独立 replay 和[远端 CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401)。这些结果属于此前控制/scope 切片，包含如今被取代的画像确认规则。随后 **PR #16 的 U0 基线通过 157 个本地测试（另有 101 个 pytest subtest）、11 个确定性套件与 replay PASS**，使用独立临时数据目录，未调用 provider，见 [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16)。这些历史检查不验证新增真实宿主，也不代表 U01–U08 体验已验收；真实运行的对话与请求记录须单独评估召回、纠错及自然适配，详见[维护证据](docs/maintenance.md)。
 
 ## 状态与路线
 
@@ -96,9 +112,9 @@ python -m evals.runner --suite all
 | 阶段 | 下一步 | 完成证据 |
 | --- | --- | --- |
 | U0 — 本地通过 | 证据驱动的自动画像适配 | 规则/API 回归通过；远端发布与用户体验验收分别记录。 |
-| 下一步 S1-a / S0-c | 最小宿主与临时上下文 | 实际交付输入及后续回答遵守当前要求、纠错与既有 scope。 |
+| S1-a / S0-c — 评估中 | 真实 provider 有限窗口宿主、临时保留校验及受控模型选择已实现 | 检查实际交付输入和后续回答是否遵守当前要求、纠错与 scope；实现不等于体验验收。 |
 | S1 体验 | 有用的项目任务续接 | 回查旧决定，被纠正后改变，不反复提醒记忆或提及无关旧事。 |
-| S2–S4 | 长期理解与真实 provider 评测 | 区分稳定偏好、持续变化与情境例外，长期测量帮助程度与纠正成本。 |
+| S2–S4 | 长期理解与真实模型纵向评测 | 区分稳定偏好、持续变化与情境例外，长期测量帮助程度与纠正成本。 |
 
 [Draft PR #12](https://github.com/2sao7sao/EvolveMemory/pull/12)记录修正后的方向与剩余协议。首个项目场景不把产品愿景缩减为任务跟踪。愿景、实现与未验证行为的区别见[定位](docs/positioning.md)、[开发路线](docs/next-development-spec.md)和[体验验收 U01–U08](docs/next-development-spec.md#fixed-experience-acceptance)。
 

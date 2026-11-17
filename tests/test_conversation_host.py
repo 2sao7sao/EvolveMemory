@@ -62,7 +62,7 @@ class FakeGateway:
     def query(self, text, session_id, timestamp, *, limit=20, candidate_memory_ids=None):
         self.queries.append({"text": text, "session_id": session_id, "timestamp": timestamp,
                              "limit": limit, "candidate_memory_ids": deepcopy(candidate_memory_ids)})
-        return {"candidates": self.selected(candidate_memory_ids), "audit_only": "unsent-audit-sentinel"}
+        return {"candidates": self.selected(candidate_memory_ids), "model_candidates": self.selected(candidate_memory_ids), "audit_only": "unsent-audit-sentinel"}
 
     def ingest(self, text, session_id, timestamp, turn_id, payload):
         self.ingests.append({"text": text, "session_id": session_id, "timestamp": timestamp,
@@ -73,7 +73,8 @@ class FakeGateway:
         self.prompts.append({"text": text, "session_id": session_id, "timestamp": timestamp,
                              "candidate_memory_ids": deepcopy(candidate_memory_ids)})
         compiled = self.compiled if self.selected(candidate_memory_ids) else "no-stored-memory"
-        return {"system_guidance": "governed-guidance-sentinel", "assembled_prompt": compiled}
+        return {"system_guidance": "governed-guidance-sentinel", "assembled_prompt": compiled,
+                "memory_context": {"source_notes": self.selected(candidate_memory_ids)}}
 
     def export(self):
         raise AssertionError("The conversation host must not read an audit export to answer.")
@@ -81,7 +82,7 @@ class FakeGateway:
 
 def candidate(key, value, evidence, **extra):
     return {"layer": "semantic_fact", "key": key, "value": value, "confidence": .9,
-            "authority": "user_explicit", "sensitivity": "personal", "evidence": evidence, **extra}
+            "authority": "user_explicit", "sensitivity": "personal", "evidence": evidence, "retention": "durable", **extra}
 
 
 class ConversationHostTest(unittest.TestCase):
@@ -126,6 +127,46 @@ class ConversationHostTest(unittest.TestCase):
         self.assertEqual(len(provider.calls[-1]["messages"]), 2)
         self.assertNotIn("user-sentinel-1", json.dumps(provider.calls[-3:]))
         self.assertEqual(memory.ingests[-1]["session_id"], "session-b")
+
+    def test_missing_retention_fails_closed(self):
+        proposed = candidate("project_once", "原文", "原文")
+        proposed.pop("retention")
+        accepted, rejected = validate_grounded_proposals({"candidate_memories": [proposed]}, "原文", NOW)
+        self.assertEqual(accepted["candidate_memories"], [])
+        self.assertEqual(rejected[0]["reason"], "invalid_retention")
+
+    def test_revocation_between_query_and_final_prompt_cannot_readd_evidence(self):
+        class RevokingGateway(FakeGateway):
+            def prompt(inner, *args, **kwargs):
+                inner.final_denied_ids.add("revoked")
+                return super(RevokingGateway, inner).prompt(*args, **kwargs)
+        memory = RevokingGateway([{"memory_id": "revoked", "key": "project_fact",
+            "value": "old-value-sentinel", "evidence": "old-quote-sentinel"}])
+        provider = FakeProvider()
+        self.turn(ConversationHost(provider, memory=memory), 1)
+        system = provider.calls[-1]["messages"][0]["content"]
+        self.assertIn("no-stored-memory", system)
+        self.assertNotIn("old-value-sentinel", system)
+        self.assertNotIn("old-quote-sentinel", system)
+
+    def test_all_model_stages_use_safe_projection_not_raw_query_records(self):
+        class SafeProjectionGateway(FakeGateway):
+            def query(inner, *args, **kwargs):
+                result = super(SafeProjectionGateway, inner).query(*args, **kwargs)
+                result["model_candidates"] = [{"memory_id": "private", "key": "current_emotional_state",
+                    "value": "Use only as aggregate context"}]
+                return result
+            def prompt(inner, *args, **kwargs):
+                return {"assembled_prompt": "Use only as aggregate context",
+                        "memory_context": {"source_notes": [{"memory_id": "private",
+                            "value": "Use only as aggregate context"}]}}
+        provider = FakeProvider()
+        memory = SafeProjectionGateway([{"memory_id": "private", "value": "private-value-sentinel",
+                                        "evidence": "private-evidence-sentinel"}])
+        self.turn(ConversationHost(provider, memory=memory), 1)
+        sent = json.dumps(provider.calls)
+        self.assertNotIn("private-value-sentinel", sent)
+        self.assertNotIn("private-evidence-sentinel", sent)
 
     def test_recent_only_arm_does_not_extract_or_request_memory(self):
         provider = FakeProvider()
