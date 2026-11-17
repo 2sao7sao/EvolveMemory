@@ -29,12 +29,26 @@ from memory_system.conversation import ConversationHost, V2MemoryGateway
 from memory_system.providers import ChatClient, ProviderError
 
 
+MODEL_PEAK_RATES_USD_PER_MILLION_TOKENS = {
+    "deepseek-flash": {"input_cache_miss": 0.30, "output": 1.20},
+    "deepseek-v4-pro": {"input_cache_miss": 1.32, "output": 3.96},
+}
+
+
+def pricing_rates_for_model(model: str) -> dict[str, float]:
+    """Pinned peak tariffs; aliases need an explicit, verified price entry."""
+    if model not in MODEL_PEAK_RATES_USD_PER_MILLION_TOKENS:
+        raise ValueError(f"No evaluation tariff configured for model: {model}")
+    return dict(MODEL_PEAK_RATES_USD_PER_MILLION_TOKENS[model])
+
+
 def save_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class RecordedProvider:
     def __init__(self, client: ChatClient, output: Path, *, max_calls: int, max_cost: float) -> None:
+        self.pricing_rates = pricing_rates_for_model(client.model)
         self.client, self.output = client, output
         self.max_calls, self.max_cost = max_calls, max_cost
         self.calls, self.prompt_tokens, self.completion_tokens = 0, 0, 0
@@ -42,9 +56,10 @@ class RecordedProvider:
         self.stage = "initial"
 
     def complete(self, messages: list[dict], **options):
-        # Conservative all-input-cache-miss peak tariff; this is not a bill.
-        reserved = sum(len(m["content"]) for m in messages) * 0.3 / 1_000_000
-        reserved += options.get("max_tokens", 1200) * 1.2 / 1_000_000
+        # Peak, all-input-cache-miss tariff with a character-count input heuristic;
+        # this reservation is an estimate, not a strict provider billing cap.
+        reserved = sum(len(m["content"]) for m in messages) * self.pricing_rates["input_cache_miss"] / 1_000_000
+        reserved += options.get("max_tokens", 1200) * self.pricing_rates["output"] / 1_000_000
         if self.calls >= self.max_calls or self.estimated_peak_cost_usd + reserved > self.max_cost:
             raise RuntimeError("local_provider_budget_exceeded")
         self.calls += 1
@@ -60,7 +75,8 @@ class RecordedProvider:
         usage = result.usage
         self.prompt_tokens += int(usage.get("prompt_tokens", 0))
         self.completion_tokens += int(usage.get("completion_tokens", 0))
-        self.estimated_peak_cost_usd = (self.prompt_tokens * 0.3 + self.completion_tokens * 1.2) / 1_000_000
+        self.estimated_peak_cost_usd = (self.prompt_tokens * self.pricing_rates["input_cache_miss"]
+                                        + self.completion_tokens * self.pricing_rates["output"]) / 1_000_000
         self._record(record)
         return result
 
@@ -110,8 +126,10 @@ def main() -> int:
     parser.add_argument("--max-calls", type=int, default=150)
     parser.add_argument("--max-cost-usd", type=float, default=2.0)
     args = parser.parse_args()
-    if args.model != "deepseek-flash":
-        parser.error("This evaluation tariff is pinned to deepseek-flash; configure other models separately.")
+    try:
+        pricing_rates_for_model(args.model)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.output.exists() and any(args.output.iterdir()):
         parser.error("Output must be new/empty to preserve previous runs.")
     args.output.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -161,6 +179,9 @@ def main() -> int:
     source_hashes = {str(p.relative_to(ROOT)): sha256(p.read_bytes()).hexdigest()
                      for p in [ROOT / "app.py", Path(__file__).resolve(), *sorted((ROOT / "memory_system").rglob("*.py"))]}
     save_json(args.output / "started.json", {"started_at": started, "code_commit": started_commit,
+              "model_requested": args.model,
+              "pricing_rates_usd_per_million_tokens": provider.pricing_rates,
+              "pricing_basis": "peak_all_input_cache_miss",
               "working_tree_diff_sha256": started_diff, "source_hashes": source_hashes, "resume": resume_info,
               "scenario_sha256": sha256(scenario_bytes).hexdigest(),
               "rubric_sha256": sha256(args.rubric.read_bytes()).hexdigest()})
@@ -221,6 +242,8 @@ def main() -> int:
                     "provider_calls": provider.calls, "prompt_tokens": provider.prompt_tokens,
                     "completion_tokens": provider.completion_tokens,
                     "estimated_peak_cost_usd": round(provider.estimated_peak_cost_usd, 6),
+                    "pricing_rates_usd_per_million_tokens": provider.pricing_rates,
+                    "pricing_basis": "peak_all_input_cache_miss",
                     "pricing_source": "https://api-docs.deepseek.com/quick_start/pricing/",
                     "billing_note": "Conservative peak, all input cache-miss estimate; not an account bill. Failed calls may also be billed.",
                     "resume": resume_info, "synthetic_user_turns": True, "real_provider": provider.calls > 0, "expectations_sent_to_model": False}
