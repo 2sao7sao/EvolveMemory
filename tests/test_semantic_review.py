@@ -2,7 +2,7 @@
 from copy import deepcopy
 import unittest
 
-from memory_system.semantic_review import apply_semantic_review
+from memory_system.semantic_review import apply_semantic_review, verify_retractions
 
 
 def proposal(key="detail_preference", value="concise", **changes):
@@ -96,3 +96,55 @@ class SemanticReviewTest(unittest.TestCase):
         ], existing)
         self.assertEqual(result["memory_retractions"], [])
         self.assertEqual(len(rejected), 4)
+
+
+class CorrectionVerificationTest(unittest.TestCase):
+    def test_only_explicit_per_id_contradiction_can_retire_a_known_assertion(self):
+        proposal = {"memory_id": "old", "evidence": "new rule", "reason": "change",
+                    "assertion": {"key": "communication_style", "value": "direct"}}
+        for relation in ("compatible", "uncertain", None):
+            with self.subTest(relation=relation):
+                accepted, rejected = verify_retractions([proposal], {"decisions": [
+                    {"memory_id": "old", "relation": relation},
+                    {"memory_id": "unknown", "relation": "contradicts"}]})
+                self.assertEqual(accepted, [])
+                self.assertEqual(len(rejected), 1)
+        accepted, rejected = verify_retractions([proposal], {"decisions": [{"memory_id": "old", "relation": "contradicts"}]})
+        self.assertEqual(accepted, [{"memory_id": "old", "evidence": "new rule", "reason": "change"}])
+        self.assertEqual(rejected, [])
+
+    def test_missing_malformed_duplicate_or_policy_only_is_not_verified(self):
+        proposal = {"memory_id": "old", "evidence": "correction", "reason": "change",
+                    "assertion": {"key": "detail_preference", "value": "concise"}}
+        verdict = {"memory_id": "old", "relation": "contradicts"}
+        for review in ({}, None, {"decisions": "bad"}, {"decisions": [verdict, verdict]}):
+            with self.subTest(review=review):
+                self.assertEqual(verify_retractions([proposal], review)[0], [])
+        proposal.pop("assertion")
+        self.assertEqual(verify_retractions([proposal], {"decisions": [verdict]})[0], [])
+
+    def test_project_stage_can_be_reclassified_without_guessing_expiration(self):
+        candidate = proposal("project_scope", "仅我自己试用", layer="semantic_fact", retention="state", valid_to="2026-11-18T00:00:00Z", validity={"valid_to": "2026-11-18T00:00:00Z"})
+        review = {"decisions": [verdict(evidence_kind="project_fact", retention="until_changed")]}
+        result, _ = apply_semantic_review([candidate], review, text="仅我自己试用", existing_assertions=[])
+        self.assertEqual(result["candidate_memories"][0]["retention"], "until_changed")
+        self.assertNotIn("valid_to", result["candidate_memories"][0])
+        self.assertNotIn("validity", result["candidate_memories"][0])
+        candidate["retention"] = "turn"
+        self.assertEqual(apply_semantic_review([candidate], review, text="仅我自己试用", existing_assertions=[])[0]["candidate_memories"], [])
+
+    def test_positive_context_rule_survives_rejection_of_inexpressive_enum(self):
+        quote = "平常先说方案中合理的一点，再温和而明确地说明问题"
+        candidate = proposal("communication_style", "direct", authority="user_explicit")
+        decision = verdict(relation="contradicts", evidence_kind="contextual_preference",
+            replacement_rule={"key": "contextual_default_communication_preference", "evidence": quote, "relation": "supports"})
+        result, rejected = apply_semantic_review([candidate], {"decisions": [decision]}, text=quote, existing_assertions=[])
+        self.assertEqual(result["candidate_memories"][0]["value"], quote)
+        self.assertEqual(result["candidate_memories"][0]["key"], "contextual_default_communication_preference")
+        self.assertTrue(rejected)
+        for invalid in ("相反偏好", ""):
+            decision["replacement_rule"]["evidence"] = invalid
+            self.assertEqual(apply_semantic_review([candidate], {"decisions": [decision]}, text=quote, existing_assertions=[])[0]["candidate_memories"], [])
+        decision["replacement_rule"]["evidence"] = quote
+        candidate["retention"] = "turn"
+        self.assertEqual(apply_semantic_review([candidate], {"decisions": [decision]}, text=quote, existing_assertions=[])[0]["candidate_memories"], [])

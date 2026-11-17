@@ -68,7 +68,7 @@ python examples/run_live_conversation.py \
   --output data/live-runs/run-01
 ```
 
-Point to an existing private key file; do not copy the key into the repository or command text. The output directory must be new or empty. Defaults are **100 logical provider calls** and a **US$2 estimated-cost guard**, not a provider billing cap; retries and failed calls may also be billed. This command makes paid external model calls. See the [live-run contract](docs/runtime-reference.md#live-deepseek-conversation) for optional arguments, boundaries, and artifacts.
+Point to an existing private key file; do not copy the key into the repository or command text. The output directory must be new or empty. Defaults are **150 logical provider calls** and a **US$2 estimated-cost guard**, not a provider billing cap; retries and failed calls may also be billed. This command makes paid external model calls. See the [live-run contract](docs/runtime-reference.md#live-deepseek-conversation) for optional arguments, boundaries, and artifacts.
 
 Open `data/live-runs/run-01/transcript.html` or `transcript.md` after the run. Per-turn JSON, `provider_calls.jsonl`, and `manifest.json` preserve the actual delivered context, raw replies, failures, usage, and cost estimate. A completed run is evidence of execution, not acceptance of natural understanding.
 

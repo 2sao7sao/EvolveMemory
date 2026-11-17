@@ -854,14 +854,10 @@ class ResponsePolicyEngine:
                 policy.tone = "calm_and_supportive"
             policy.rationale.append("recent emotional state suggests more support is useful")
 
-        bandwidth = latest_by_key.get("current_bandwidth")
-        if bandwidth and bandwidth.value == "busy":
-            policy.pace = "fast"
-            if policy.structure == "balanced":
-                policy.structure = "answer_first"
-            if policy.detail_level == "medium":
-                policy.detail_level = "low"
-            policy.rationale.append("current bandwidth is low, so the answer should be faster and leaner")
+        # Bandwidth is a scheduling fact, not evidence of a communication style.
+        # Keep it available through governed facts for capacity planning without
+        # imposing shorter answers, conclusion-first structure, or faster pacing.
+        # Explicit preferences and the current request still shape the response.
 
         work_status = latest_by_key.get("work_status")
         if work_status and work_status.value == "job_seeking":

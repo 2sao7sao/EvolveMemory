@@ -394,6 +394,8 @@ The runner starts a loopback-only API with a fresh synthetic user, explicitly en
 | --- | --- |
 | Recent context | Both `memory` and `recent_only` arms retain at most the last two user/assistant pairs. Session changes clear this buffer. Only the memory arm can reuse authorized stored project records across sessions. |
 | Extraction | The model receives the current user turn, bounded recent context, permitted memory summaries, preference slots, and an output schema. Exact evidence must occur in the current user text; assistant context is not user authority. This substring check does not prove semantic entailment. |
+| Semantic review | A separate call to the same model checks support/contradiction, current-task versus enduring evidence, and context. This is fallible model judgment, not an entailment proof. Only supported persistable proposals survive; missing/duplicate verdicts fail closed. A contextual preference cannot be disguised as a direct fact or generic enum. |
+| Source retraction | The reviewer can propose `memory_retractions` for an existing governed preference/semantic assertion with exact current-turn evidence. The ingest endpoint independently rechecks owner, exact scope, settings, role, lifetime and write mode. It retires that source and its automatic dependent profiles in one database transaction, retains audit/history, and blocks same-turn re-addition or duplicate retraction audit. Direct profile retraction is rejected; it does not erase all supporting sources. |
 | Retention | The host requires `durable`, `state`, or `turn`; missing/invalid retention is rejected. `turn` candidates are excluded from ingest; `state` and `current_bandwidth` need a timezone-aware future `valid_to`. The prompt recommends short state lifetimes, usually within 48 hours; the validator enforces a future expiry, not a hard 48-hour maximum. Natural-language temporary scope can further narrow persistence. |
 | Preference validation | Ordinary preferences must use registry keys and enumerated values. `current_bandwidth` accepts `busy` or `available`. A `contextual_` preference key can carry a conditional text rule. Direct model-written profiles are rejected; non-explicit confidence is capped at 0.75 before governed evidence accumulation. |
 | Candidate pool | After ingest, a governed query returns at most 50 candidates. The model receives only `model_candidates`, a gate-safe projection; policy/summary-only evidence is not restored as raw text. Settings, scope, time, profile-source checks, deterministic ranking, and the use gate already apply. This is a bounded pool, not an exhaustive full-history or full-database semantic search. |
@@ -405,7 +407,7 @@ The extractor and selector are real model calls, so their decisions can still be
 
 ### Limits and saved evidence
 
-Defaults are `--max-calls 100` and `--max-cost-usd 2.0`. The call limit counts logical completions, not each HTTP retry; the client can retry a logical call once in this runner. The local cost guard uses estimated input/output usage and a reserved next-call estimate, not an account billing limit. Reported `estimated_peak_cost_usd` uses the runner's pinned all-input-cache-miss tariff for `deepseek-flash`; it is **not a bill**, and retries or failed calls may incur additional charges. The runner rejects other model identifiers until its tariff assumptions are configured separately.
+Defaults are `--max-calls 150` and `--max-cost-usd 2.0`. The call limit counts logical completions, not each HTTP retry; the client can retry a logical call once in this runner. The local cost guard uses estimated input/output usage and a reserved next-call estimate, not an account billing limit. Reported `estimated_peak_cost_usd` uses the runner's pinned all-input-cache-miss tariff for `deepseek-flash`; it is **not a bill**, and retries or failed calls may incur additional charges. The runner rejects other model identifiers until its tariff assumptions are configured separately.
 
 | Artifact in `--output` | Evidence |
 | --- | --- |
@@ -434,3 +436,18 @@ Review actual replies against the frozen rubric; a successful HTTP run or a larg
 | `GET /v2/users/{user_id}/memory/audit/export` | Export records, settings, events, and audit data. |
 
 The [live evaluation report](live-evaluation-results.md) records observed extraction and correction failures; exact substring evidence is not a semantic entailment check.
+
+### Correcting an existing synthetic run
+
+Use `--resume-run /private/prior-run` with a same-project synthetic scenario to copy the prior SQLite store via the read-only backup API. Original settings and user identity are retained; recent dialogue is not restored. `initial-memory-export.json`, source manifest/database hashes, and final export distinguish repair of an existing error from a fresh empty-store run. Use `--rubric /private/frozen-rubric.md` to record a separate scenario's actual evaluation hash; rubric contents never enter model requests.
+
+State observations renew their expiry on same-value updates. State/task/contextual signals cannot promote stable profiles. Short answers no longer imply cognitive load, and being busy no longer implies a stable profile; old evidence for those removed mappings is excluded from read-time qualification. Unmarked legacy payloads retain the earlier compatibility contract and are not retroactively semantically verified. Exact source retraction is atomic; the whole ingest/model-generation flow is not.
+
+
+### Live host correction semantics (v5)
+
+The host distinguishes the exact allowed assertion from its rendered style policy during semantic review. Before an explicit source retraction it requests a separate contradiction verdict; compatible, missing, duplicate, malformed or uncertain verdicts leave the source active. An invalid extraction cannot initiate a retraction. Valid replacement project facts use normal governed supersession rather than retiring the old fact before validating the replacement.
+
+Project decisions, scope and progress may use `retention=until_changed`: they remain current until superseded, with no guessed deadline. Busy/available remains a typed expiring state, and it does not automatically dictate answer length, order or pace. The independent legacy session profile-inference mappings are outside this host change.
+
+When a fixed preference enum cannot represent a user's explicitly stated positive correction, semantic review may retain an exact current-text rule under a `contextual_` key. It cannot derive the opposite preference from negation alone. These model judgments remain fallible; the unit contracts do not prove semantic correctness.

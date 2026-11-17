@@ -237,7 +237,7 @@ class LLMMemoryProposalExtractor:
         session_id: str | None,
     ) -> MemoryRecord:
         for field, allowed in {
-            "retention": {"durable", "state", "turn"},
+            "retention": {"durable", "until_changed", "state", "turn"},
             "evidence_kind": {"project_fact", "sustained_preference", "contextual_preference",
                               "behavior_observation", "current_state", "current_task"},
         }.items():

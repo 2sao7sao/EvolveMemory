@@ -41,3 +41,23 @@ class ProviderProjectionTest(unittest.TestCase):
         self.assertEqual(notes[0]["evidence"], "choose A")
         self.assertEqual(notes[0]["source_turn_ids"], ["T02"])
         self.assertEqual(compiler.provider_candidates(MemoryGateResult([], [suppressed])), [])
+
+
+    def test_preference_correction_uses_exact_claim_without_policy_additions_or_private_quote(self):
+        memory = MemoryItem(MemoryType.PREFERENCE, "communication_style", "direct", .9,
+                            "dialogue", "private evidence sentinel", datetime.now(timezone.utc),
+                            memory_id="pref", sensitivity="personal")
+        decision = MemoryGateDecision(memory, MemoryLayer.PREFERENCE,
+            MemoryUseAction.STYLE_ONLY, 1., prompt_visibility=PromptVisibility.POLICY_ONLY,
+            safe_to_mention=False)
+        result = ContextCompiler().provider_candidates(MemoryGateResult([decision], []))[0]
+        self.assertEqual(result["assertion"], {"key": "communication_style", "value": "direct"})
+        self.assertIn("warm", result["value"])
+        self.assertNotIn("private evidence sentinel", json.dumps(result))
+        memory.sensitivity = "sensitive"
+        result = ContextCompiler().provider_candidates(MemoryGateResult([decision], []))[0]
+        self.assertNotIn("assertion", result)
+        decision.action = MemoryUseAction.SUMMARIZE_ONLY
+        memory.sensitivity = "personal"
+        result = ContextCompiler().provider_candidates(MemoryGateResult([decision], []))[0]
+        self.assertNotIn("assertion", result)

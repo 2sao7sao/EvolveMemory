@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .gating import MemoryGateResult, MemoryUseAction
-from .models import PromptVisibility
+from .models import MemoryLayer, PromptVisibility, memory_item_layer
 from .schema import MemoryItem, ResponsePolicy
 
 
@@ -100,10 +100,18 @@ class ContextCompiler:
                           MemoryUseAction.FOLLOW_UP, MemoryUseAction.CLARIFY})
             if direct:
                 item.update(value=raw.get("value"), evidence=raw.get("evidence"))
+                item["assertion"] = {"key": raw["key"], "value": raw["value"]}
             elif decision.action == MemoryUseAction.SUMMARIZE_ONLY:
                 item["value"] = f"Use only as aggregate context, do not mention details: {decision.memory.key}"
             else:
                 item["value"] = self._style_line(decision.memory)
+            # Ordinary preference values are already represented by the style policy.
+            # Preserve their exact meaning for correction checks instead of treating
+            # added presentation advice (e.g. warmth) as something the user said.
+            if (memory_item_layer(decision.memory) == MemoryLayer.PREFERENCE
+                    and decision.memory.sensitivity in {"public", "personal"}
+                    and decision.action in {MemoryUseAction.STYLE_ONLY, MemoryUseAction.HIDDEN_CONSTRAINT}):
+                item["assertion"] = {"key": raw["key"], "value": raw["value"]}
             result.append(item)
         return result
 

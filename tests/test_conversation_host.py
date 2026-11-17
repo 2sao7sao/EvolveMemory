@@ -15,11 +15,12 @@ NOW = datetime(2026, 11, 16, tzinfo=timezone.utc).isoformat()
 
 
 class FakeProvider:
-    def __init__(self, extraction=None, selection=None, semantic_review=None):
+    def __init__(self, extraction=None, selection=None, semantic_review=None, retraction_review=None):
         self.calls = []
         self.extraction = extraction if extraction is not None else {"candidate_memories": []}
         self.selection = selection
         self.semantic_review = semantic_review
+        self.retraction_review = retraction_review
         self.answers = 0
 
     def complete(self, messages, **options):
@@ -27,7 +28,12 @@ class FakeProvider:
         self.calls.append(request)
         if options.get("json_mode"):
             payload = json.loads(messages[-1]["content"])
-            if "proposal_candidates" in payload:
+            if "retraction_proposals" in payload:
+                result = self.retraction_review if self.retraction_review is not None else {
+                    "decisions": [{"memory_id": item["memory_id"], "relation": "contradicts",
+                                   "reason": "fake independent contradiction check"}
+                                  for item in payload["retraction_proposals"]]}
+            elif "proposal_candidates" in payload:
                 result = self.semantic_review if self.semantic_review is not None else {
                     "decisions": [{"candidate_index": i, "relation": "supports",
                         "evidence_kind": "sustained_preference" if c.get("layer") == "preference" else "project_fact",
@@ -138,7 +144,8 @@ class ConversationHostTest(unittest.TestCase):
     def test_semantic_correction_retracts_old_assertion_without_reinforcing_or_reversing_it(self):
         quote = "不是一概越短越好"
         memory = FakeGateway([{"memory_id": "old", "key": "detail_preference", "type": "preference",
-                              "value": "Keep the response concise."}])
+                              "value": "Keep the response concise.",
+                              "assertion": {"key": "detail_preference", "value": "concise"}}])
         provider = FakeProvider({"candidate_memories": [candidate("detail_preference", "concise", quote,
             layer="preference")]}, semantic_review={"decisions": [{"candidate_index": 0,
                 "relation": "contradicts", "evidence_kind": "correction", "retention": "durable"}],
@@ -150,6 +157,76 @@ class ConversationHostTest(unittest.TestCase):
         self.assertEqual(sent["current_user_turn"], quote)
         self.assertEqual(sent["proposal_candidates"][0]["value"], "concise")
         self.assertEqual(trace["semantic_review"]["request_metadata"]["request_body"], provider.calls[1])
+
+    def test_invalid_project_replacement_does_not_retract_the_existing_fact_first(self):
+        text = "第一轮改为仅本人试用。"
+        old = {"memory_id": "old-scope", "key": "project_pilot_scope", "type": "state",
+               "value": "本人及两位协作者试用", "authority": "user_explicit",
+               "assertion": {"key": "project_pilot_scope", "value": "本人及两位协作者试用"}}
+        memory = FakeGateway([old])
+        provider = FakeProvider({"candidate_memories": [candidate(
+            "project_pilot_scope", "仅本人试用", "不在当前原文里的引用")]}, semantic_review={
+                "decisions": [{"candidate_index": 0, "relation": "supports",
+                    "evidence_kind": "project_fact", "retention": "durable"}],
+                "memory_retractions": [{"memory_id": "old-scope", "evidence": text,
+                                       "reason": "project scope updated"}]})
+        trace = self.turn(ConversationHost(provider, memory=memory), 1, text=text)
+        payload = memory.ingests[0]["payload"]
+        self.assertEqual(payload["candidate_memories"], [])
+        self.assertEqual(payload.get("memory_retractions", []), [])
+        self.assertIn("evidence_not_in_current_user_turn", [item["reason"] for item in trace["rejected_proposals"]])
+        self.assertIn("replacement_uses_governed_supersession", [item["reason"] for item in trace["rejected_proposals"]])
+        self.assertEqual(self.json_calls(provider, "retraction_proposals"), [])
+        self.assertEqual(memory.candidates, [old])
+
+    def test_failed_independent_retraction_review_preserves_valid_new_fact(self):
+        text = "不是任何时候都要短。我已完成导入页。"
+        verdicts = [
+            "broken-json",
+            {"decisions": []},
+            {"decisions": [{"memory_id": "old", "relation": "compatible", "reason": "can coexist"}]},
+            {"decisions": [{"memory_id": "old", "relation": "uncertain", "reason": "insufficient"}]},
+            {"decisions": [{"memory_id": "unknown", "relation": "contradicts", "reason": "wrong id"}]},
+            {"decisions": [{"memory_id": "old", "relation": "contradicts"},
+                           {"memory_id": "old", "relation": "compatible"}]},
+        ]
+        for verdict in verdicts:
+            with self.subTest(verdict=verdict):
+                memory = FakeGateway([{"memory_id": "old", "key": "detail_preference", "type": "preference",
+                    "value": "Keep the response concise.", "authority": "user_implicit",
+                    "assertion": {"key": "detail_preference", "value": "concise"}}])
+                provider = FakeProvider({"candidate_memories": [candidate(
+                    "project_import_progress", "导入页已完成", "我已完成导入页", retention="until_changed")]},
+                    semantic_review={"decisions": [{"candidate_index": 0, "relation": "supports",
+                        "evidence_kind": "project_fact", "retention": "until_changed"}],
+                        "memory_retractions": [{"memory_id": "old", "evidence": "不是任何时候都要短",
+                                               "reason": "prior preference may be too broad"}]},
+                    retraction_review=verdict)
+                trace = self.turn(ConversationHost(provider, memory=memory), 1, text=text)
+                payload = memory.ingests[0]["payload"]
+                self.assertEqual([(item["key"], item["value"]) for item in payload["candidate_memories"]],
+                                 [("project_import_progress", "导入页已完成")])
+                self.assertEqual(payload.get("memory_retractions", []), [])
+                self.assertEqual(trace["status"], "completed")
+                self.assertTrue(trace["rejected_proposals"])
+                sent = self.json_calls(provider, "retraction_proposals")[0]
+                self.assertEqual(sent["retraction_proposals"][0]["assertion"],
+                                 {"key": "detail_preference", "value": "concise"})
+                self.assertNotIn("Keep the response concise.", json.dumps(sent))
+
+    def test_invalid_raw_extraction_cannot_erase_existing_project_fact(self):
+        text = "第一轮改为仅本人试用。"
+        memory = FakeGateway([{"memory_id": "old-scope", "key": "project_pilot_scope", "type": "state",
+            "value": "三人试用", "assertion": {"key": "project_pilot_scope", "value": "三人试用"}}])
+        provider = FakeProvider({"candidate_memories": [candidate(
+            "project_pilot_scope", "仅本人试用", text, confidence="invalid")]},
+            semantic_review={"decisions": [], "memory_retractions": [
+                {"memory_id": "old-scope", "evidence": text, "reason": "scope changed"}]})
+        trace = self.turn(ConversationHost(provider, memory=memory), 1, text=text)
+        self.assertEqual(trace["extraction_error"]["reason"], "invalid_extraction")
+        self.assertEqual(memory.ingests[0]["payload"]["candidate_memories"], [])
+        self.assertEqual(memory.ingests[0]["payload"].get("memory_retractions", []), [])
+        self.assertEqual(trace["status"], "completed")
 
     def test_malformed_semantic_review_does_not_default_to_original_extraction(self):
         provider = FakeProvider({"candidate_memories": [candidate("project_decision", "A", "选A")]},

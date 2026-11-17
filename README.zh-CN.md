@@ -68,7 +68,7 @@ python examples/run_live_conversation.py \
   --output data/live-runs/run-01
 ```
 
-指向已有私有密钥文件，不把密钥复制进仓库或命令文本。输出目录必须不存在或为空。默认限制为 **100 次逻辑 provider 调用**与 **2 美元估算费用保护**，不等于 provider 账单硬上限；重试和失败调用也可能收费。这条命令会发起付费外部模型调用。可选参数、边界与产物见[真实运行契约](docs/runtime-reference.zh-CN.md#live-deepseek-conversation)。
+指向已有私有密钥文件，不把密钥复制进仓库或命令文本。输出目录必须不存在或为空。默认限制为 **150 次逻辑 provider 调用**与 **2 美元估算费用保护**，不等于 provider 账单硬上限；重试和失败调用也可能收费。这条命令会发起付费外部模型调用。可选参数、边界与产物见[真实运行契约](docs/runtime-reference.zh-CN.md#live-deepseek-conversation)。
 
 运行后打开 `data/live-runs/run-01/transcript.html` 或 `transcript.md`。逐轮 JSON、`provider_calls.jsonl` 和 `manifest.json` 保留实际交付上下文、原始回答、失败、用量与费用估算。运行完成只证明执行过，不代表自然理解已通过验收。
 

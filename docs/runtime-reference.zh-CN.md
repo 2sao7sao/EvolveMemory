@@ -377,6 +377,8 @@ runner 自行启动仅监听 loopback 的 API，使用新的合成用户并明�
 | --- | --- |
 | 近期上下文 | `memory` 和 `recent_only` 两组都最多保留最近两组用户/助手对话，切换 session 时清空。只有记忆组能跨 session 复用已授权的项目记录。 |
 | 抽取 | 模型接收当前用户文本、有限近期上下文、允许的记忆摘要、偏好 slots 与输出 schema。evidence 必须是当前用户文本的连续原文；助手背景不等于用户授权。这种子串校验不证明语义蕴含。 |
+| 语义复核 | 对同一模型再作一次独立调用，判断支持/反证、当前任务/持久偏好与情境。它仍可能判断错误，不是语义正确性证明。缺失/重复判断不默认支持；只有确实支持且可持久化的提案继续。情境偏好不能伪装为直接事实或无条件枚举。 |
+| 旧断言撤回 | 复核器可用当前原文证据和已授权候选ID提出 `memory_retractions`。ingest再次检查用户、精确scope、设置、角色、时间与写入开关；在一个数据库事务内退役旧preference/semantic断言及依赖它的自动画像，保留历史证据和审计，阻止同轮重新加回与重试重复审计。直接撤画像被拒绝，不会顺带删除其所有源。 |
 | 保留期限 | 宿主要求输出 `durable`、`state` 或 `turn`，缺失/无效 retention 会被拒绝；`turn` 不进入 ingest，`state` 和 `current_bandwidth` 必须有含时区且晚于当前时间的 `valid_to`。提示词建议短状态通常不超过 48 小时；校验器约束未来到期，不强制 48 小时上限。自然语言临时范围还可进一步收窄持久化。 |
 | 偏好校验 | 常规偏好使用 registry key 和枚举值；`current_bandwidth` 仅接受 `busy` 或 `available`。`contextual_` 前缀偏好可保存带情境条件的文字规则。模型直接写画像会被拒绝；非明确自述的 confidence 在进入受控证据积累前最多为 0.75。 |
 | 候选池 | ingest 后受控查询返回最多 50 条候选；模型只接收 `model_candidates` 门控安全投影，不把 policy/summary-only 依据恢复为原文。候选已执行设置、scope、时间、画像来源、确定性排序与使用门控。这是有限候选池，不是完整历史或全库语义搜索。 |
@@ -388,7 +390,7 @@ runner 自行启动仅监听 loopback 的 API，使用新的合成用户并明�
 
 ### 限额与证据产物
 
-默认 `--max-calls 100`、`--max-cost-usd 2.0`。调用数量统计逻辑 completion，不逐次统计 HTTP 重试；此 runner 的 client 允许每次逻辑调用重试一次。费用保护使用输入/输出用量估算和下一次调用预留估算，不是账号账单硬限制。`estimated_peak_cost_usd` 使用 runner 固定的 `deepseek-flash` 全部输入按缓存未命中计算的费率，**不是账单**；重试或失败请求也可能另行收费。runner 会拒绝其他模型名，其他模型需要另行配置费率假设。
+默认 `--max-calls 150`、`--max-cost-usd 2.0`。调用数量统计逻辑 completion，不逐次统计 HTTP 重试；此 runner 的 client 允许每次逻辑调用重试一次。费用保护使用输入/输出用量估算和下一次调用预留估算，不是账号账单硬限制。`estimated_peak_cost_usd` 使用 runner 固定的 `deepseek-flash` 全部输入按缓存未命中计算的费率，**不是账单**；重试或失败请求也可能另行收费。runner 会拒绝其他模型名，其他模型需要另行配置费率假设。
 
 | `--output` 下的产物 | 证据 |
 | --- | --- |
@@ -417,3 +419,18 @@ runner 自行启动仅监听 loopback 的 API，使用新的合成用户并明�
 | `GET /v2/users/{user_id}/memory/audit/export` | 导出 records、settings、events 和 audit data。 |
 
 [真实评测报告](live-evaluation-results.md)记录了实际抽取和纠错失败；证据是原文子串不代表提案正确理解了原文。
+
+### 修复已有合成试验的记忆
+
+使用 `--resume-run /private/prior-run` 和同项目的合成场景，通过只读 SQLite backup 复制原库；保留设置和用户身份，不恢复近期对话。`initial-memory-export.json`、来源manifest/数据库hash与最终export区分旧错误修复和全新空库。`--rubric /private/frozen-rubric.md`记录另一个场景实际使用的验收文件hash，验收内容不传模型。
+
+同值状态重报会更新有效期。状态、一次任务和情境规则不晋升为稳定画像；简短偏好不再推成认知负荷，忙碌不再推成稳定画像，旧库中这些被移除映射的证据也不能重新授予画像资格。未带新标记的legacy payload维持原兼容契约，并未自动完成语义复核。撤源和自动依赖退役事务原子化，不代表整个ingest或模型生成流程原子化。
+
+
+### Live host correction semantics (v5)
+
+The host distinguishes the exact allowed assertion from its rendered style policy during semantic review. Before an explicit source retraction it requests a separate contradiction verdict; compatible, missing, duplicate, malformed or uncertain verdicts leave the source active. An invalid extraction cannot initiate a retraction. Valid replacement project facts use normal governed supersession rather than retiring the old fact before validating the replacement.
+
+Project decisions, scope and progress may use `retention=until_changed`: they remain current until superseded, with no guessed deadline. Busy/available remains a typed expiring state, and it does not automatically dictate answer length, order or pace. The independent legacy session profile-inference mappings are outside this host change.
+
+When a fixed preference enum cannot represent a user's explicitly stated positive correction, semantic review may retain an exact current-text rule under a `contextual_` key. It cannot derive the opposite preference from negation alone. These model judgments remain fallible; the unit contracts do not prove semantic correctness.
