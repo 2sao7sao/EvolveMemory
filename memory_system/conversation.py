@@ -40,7 +40,7 @@ value 是可直接理解的中文陈述；重要决定的理由必须一起保�
 
 class V2MemoryGateway:
     def __init__(self, base_url: str, user_id: str, project_id: str) -> None:
-        self.client = httpx.Client(base_url=base_url, timeout=20, follow_redirects=False)
+        self.client = httpx.Client(base_url=base_url, timeout=20, follow_redirects=False, trust_env=False)
         self.root = f"/v2/users/{user_id}"
         self.project_id = project_id
 

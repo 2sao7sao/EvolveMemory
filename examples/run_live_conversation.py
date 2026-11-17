@@ -120,6 +120,7 @@ def main() -> int:
     scenario_bytes = args.scenario.read_bytes()
     scenario = json.loads(scenario_bytes)
     save_json(args.output / "scenario.json", scenario)
+    turns = scenario["turns"][:args.max_turns] if args.max_turns else scenario["turns"]
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]
     env = {k: v for k, v in os.environ.items() if k != "DEEPSEEK_API_KEY"}
@@ -135,7 +136,7 @@ def main() -> int:
     try:
         for _ in range(100):
             try:
-                if httpx.get(base + "/health", timeout=1).status_code == 200: break
+                if httpx.get(base + "/health", timeout=1, trust_env=False).status_code == 200: break
             except httpx.HTTPError: pass
             if server.poll() is not None: raise RuntimeError("memory_server_exited")
             time.sleep(0.1)
@@ -144,10 +145,9 @@ def main() -> int:
         settings = gateway.enable_project()
         hosts = {"memory": ConversationHost(provider, memory=gateway),
                  "recent_only": ConversationHost(provider, memory=None)}
-        base_time = datetime(2026, 11, 16, 10, tzinfo=timezone.utc)
-        turns = scenario["turns"][:args.max_turns] if args.max_turns else scenario["turns"]
+        base_time = datetime(2026, 11, 16, tzinfo=timezone.utc)
         for index, turn in enumerate(turns):
-            timestamp = (base_time + timedelta(days=turn["day_offset"], hours=turn.get("hours_offset", 0), minutes=index)).isoformat()
+            timestamp = (base_time + timedelta(days=turn["day_offset"], hours=turn.get("hours_offset", 0))).isoformat()
             for arm, host in hosts.items():
                 provider.stage = f"{turn['id']}:{arm}"
                 try:
@@ -166,7 +166,9 @@ def main() -> int:
         save_json(args.output / "memory-export.json", gateway.export())
         save_json(args.output / "settings.json", settings)
     except Exception as exc:
-        if not errors: errors.append({"type": type(exc).__name__, "code": getattr(exc, "code", "run_failure")})
+        if not errors:
+            safe_code = str(exc) if isinstance(exc, RuntimeError) and re.fullmatch(r"[a-z_]+", str(exc)) else "run_failure"
+            errors.append({"type": type(exc).__name__, "code": getattr(exc, "code", safe_code)})
     finally:
         if gateway: gateway.close()
         client.close()
@@ -177,6 +179,7 @@ def main() -> int:
         render_transcripts(args.output, scenario, results)
         manifest = {"started_at": started, "finished_at": datetime.now(timezone.utc).isoformat(),
                     "model_requested": args.model, "scenario_sha256": sha256(scenario_bytes).hexdigest(),
+                    "rubric_sha256": sha256((ROOT / "docs/live-evaluation-rubric.md").read_bytes()).hexdigest(),
                     "code_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                     "working_tree_diff_sha256": sha256(subprocess.check_output(["git", "diff", "HEAD"], cwd=ROOT)).hexdigest(),
                     "history_pairs": 2, "expected_turns": len(turns) if 'turns' in locals() else 0,
