@@ -80,6 +80,28 @@ Final code passed **205 pytest tests + 165 subtests**, **205 unittest tests**, *
 
 PR #17 remains draft because these experience failures are material. The broader protocol still lacks complete current-materials-only host controls, full source-history search, atomic concurrent revocation, delivery receipts, production authentication and longitudinal validation. This experiment neither closes #14 nor marks U01–U08 accepted.
 
+## Re-run after the evidence-polarity fix — 2026-11-18
+
+Code `c67dfaa` (draft host branch, includes [PR #18](https://github.com/2sao7sao/EvolveMemory/pull/18)). Same frozen
+scenario, same two arms, same `deepseek-flash`, no changes to the user script.
+
+| Item | Previous run | This run |
+| --- | --- | --- |
+| Replies / provider calls | 48 / 96 | 48 / 121 |
+| Estimated peak cost | $0.093850 | $0.127819 |
+| Errors | none | none |
+| `detail_tolerance` / `cognitive_load_preference` profiles | two incorrect profiles reached later prompts | none created; final `profile_evidence` is empty |
+| T13 negated preference | recorded as +0.78 support | `detail_preference` proposal rejected (`semantic_evidence_insufficient`) |
+| T24 old decision | recovered after retrieval fixes | recovered: route A, local SQLite, the original rationale, deferred items, and the single-person scope |
+| T19 scope | carried over | carried: participants are the owner only |
+
+The fix makes a preference's direction come from the quoted text, so a negation records counter evidence instead of support, one-off clauses stay `ephemeral_only`, and the semantic reviewer cannot approve a preference its own quote negates. The negated preference no longer appears in the final store, and the recovery behaviours the earlier run established still hold.
+
+**Still open after this run:**
+
+- The semantic reviewer rejected one durable project fact in T23 (`project_xiaojing_search_empty_state_copy`) as `current_request_not_lasting_evidence`, while the analogous T07 copy change was accepted. That is reviewer variance on project facts, not evidence polarity, and it leaves project-fact recall unreliable.
+- This is one run of a synthetic user script with non-blind assistant review. It is not held-out validation or owner acceptance, and U01–U08 remain unaccepted.
+- Raw dialogue, requests, and SQLite stay in the maintenance workspace `reports/EvolveMemory-live-rerun-20261118/`; only the counts and checks above are recorded here.
 ## Reproduce
 
 Every number in this document comes from repository commands; the per-command results and evidence boundaries are tabulated in [maintenance](maintenance.md#live-slice-local-validation).
