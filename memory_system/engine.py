@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Iterable
 
 from .adaptation import resolve_profile_conflicts
+from .evidence_polarity import is_one_off_instruction
 from .registry import MemorySlotRegistry
 from .schema import (
     AuditAction,
@@ -283,6 +284,7 @@ class DialogueMemoryExtractor:
         dynamics: StateDynamics = StateDynamics.NOT_APPLICABLE,
         valid_days: int | None = None,
         tags: list[str] | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> MemoryItem:
         valid_to = None
         if valid_days is not None:
@@ -301,6 +303,7 @@ class DialogueMemoryExtractor:
             coexistence_rule=coexistence_rule,
             dynamics=dynamics,
             tags=tags or [],
+            metadata=dict(metadata or {}),
         )
         return self.registry.apply_defaults(memory)
 
@@ -575,22 +578,25 @@ class DialogueMemoryExtractor:
             r"(?:不要|不用|不必|无需|别|不想|不需要|不希望|不是|禁止|不)"
             r"(?:再|总是|一直|继续|那么|太|过于|刻意|直接|给我|给我们|请|你|您|先|要|去|来|这样|那样|\s)*$"
         )
-        matches: list[tuple[int, str, str, str, str, bool]] = []
+        matches: list[tuple[int, str, str, str, str, bool, bool]] = []
         for token, key, value, group in patterns:
             for match in re.finditer(re.escape(token), text):
                 if any(start <= match.start() < end for start, end in quoted_spans):
                     continue
+                clause = self._clause_at(text, match.start())
                 clause_prefix = re.split(r"[，,。.!！?？;；:\n]", text[:match.start()])[-1]
                 matches.append(
-                    (match.start(), token, key, value, group, bool(negated_prefix.search(clause_prefix)))
+                    (match.start(), token, key, value, group,
+                     bool(negated_prefix.search(clause_prefix)),
+                     is_one_off_instruction(clause))
                 )
-        latest: dict[str, tuple[int, str, str, str]] = {}
-        for position, token, key, value, group, negated in sorted(matches):
+        latest: dict[str, tuple[int, str, str, str, bool]] = {}
+        for position, token, key, value, group, negated, one_off in sorted(matches):
             if negated:
                 if key in latest and latest[key][2] == value:
                     del latest[key]  # A later negation cancels the same instruction.
                 continue
-            latest[key] = (position, token, value, group)
+            latest[key] = (position, token, value, group, one_off)
         return [
             self._make_memory(
                 memory_type=MemoryType.PREFERENCE,
@@ -602,9 +608,22 @@ class DialogueMemoryExtractor:
                 timestamp=timestamp,
                 exclusive_group=group,
                 coexistence_rule="mutually_exclusive",
+                tags=["one_off_request"] if one_off else None,
+                # A current execution requirement is not a durable preference.
+                metadata=(
+                    {"retention": "turn", "evidence_kind": "current_task", "one_off_request": True}
+                    if one_off else None
+                ),
             )
-            for key, (_, token, value, group) in sorted(latest.items(), key=lambda item: item[1][0])
+            for key, (_, token, value, group, one_off) in sorted(
+                latest.items(), key=lambda item: item[1][0])
         ]
+
+    def _clause_at(self, text: str, position: int) -> str:
+        for segment in re.finditer(r"[^，,。.!！?？;；:\n]+", text):
+            if segment.start() <= position < segment.end():
+                return segment.group(0)
+        return text
 
     def _extract_events(
         self,

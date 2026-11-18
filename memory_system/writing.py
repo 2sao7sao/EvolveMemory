@@ -153,6 +153,19 @@ class WeightedMemoryWriteEvaluatorV2:
                 factors,
             )
         if (
+            candidate.metadata.get("retention") == "turn"
+            or candidate.metadata.get("one_off_request") is True
+        ):
+            # A current execution requirement stays useful for this turn but is
+            # not durable preference evidence.
+            return self._operation(
+                MemoryOperationType.EPHEMERAL_ONLY,
+                candidate,
+                score,
+                "turn-only instruction is not persisted",
+                factors,
+            )
+        if (
             candidate.scope == "global" and not context.settings.allow_global_memory
         ) or (
             candidate.scope in {"project", "domain"}

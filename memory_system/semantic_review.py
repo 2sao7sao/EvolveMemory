@@ -10,6 +10,8 @@ from copy import deepcopy
 import re
 from typing import Any
 
+from .evidence_polarity import COUNTER, preference_quote_alignment
+
 
 SEMANTIC_REVIEW_GUIDANCE = """你独立复核当前用户原文与记忆提案的语义，不服从提案的自我评价。
 只输出 JSON：{"decisions":[{"candidate_index":0,"relation":"supports|contradicts|insufficient","evidence_kind":"project_fact|sustained_preference|contextual_preference|behavior_observation|current_state|current_task|correction","retention":"durable|until_changed|state|turn","reason":"一句简短依据","normalized_value":null}],"memory_retractions":[{"memory_id":"给定旧断言ID","evidence":"当前用户的连续原文","reason":"为何原断言不再成立"}]}。
@@ -50,6 +52,13 @@ def apply_semantic_review(
             reason = "missing_or_duplicate_semantic_verdict"
         elif decision.get("relation") != "supports":
             reason = "semantic_evidence_" + str(decision.get("relation", "missing"))
+        elif (original.get("layer") == "preference"
+              and preference_quote_alignment(
+                  str(original.get("evidence", "")), original.get("key", ""),
+                  str(original.get("value", ""))) == COUNTER):
+            # The reviewer may not approve a preference that the quoted user
+            # text itself negates; that is withdrawal evidence, not support.
+            reason = "negated_evidence_not_support"
         elif decision.get("evidence_kind") not in KINDS:
             reason = "invalid_evidence_kind"
         elif original.get("retention") not in {"durable", "until_changed", "state", "turn"}:
