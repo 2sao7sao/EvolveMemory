@@ -86,7 +86,7 @@ Every number in this document comes from repository commands; the per-command re
 
 | Command | What it reproduces |
 | --- | --- |
-| `python3 -m pytest -q --tb=short` | Local unit, persistence, and HTTP suite: 257 tests / 249 subtests at the current branch head `ed0f6b5`, 205 / 165 on the live-tested `a1d94e3`. |
+| `python3 -m pytest -q --tb=short` | Local unit, persistence, and HTTP suite: 263 tests / 249 subtests at the current branch head, 205 / 165 on the live-tested `a1d94e3`. |
 | `python3 -m unittest discover -s tests -p 'test_*.py'` | The same suite through the CI-style runner. |
 | `python3 -m evals.runner --suite all` | Deterministic seed evaluations without a provider. |
 | `python3 examples/replay_adaptive_memory.py` | Synthetic adaptive replay (`gate_eval: 8/8`). |
