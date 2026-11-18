@@ -14,12 +14,16 @@ NOW = datetime(2026, 11, 16, tzinfo=timezone.utc)
 
 
 def preference(turn_id: str, **changes: object) -> MemoryRecord:
+    # The quoted evidence must actually express the declared value.
+    value = str(changes.get("value", "concise"))
+    evidence = ("I generally prefer detailed answers." if value == "detailed"
+                else "I generally prefer concise answers.")
     payload = {
         "user_id": "mapping-test", "session_id": "thread", "scope": "session",
-        "layer": MemoryLayer.PREFERENCE, "key": "detail_preference", "value": "concise",
-        "normalized_value": "concise", "confidence": 0.95, "authority": Authority.USER_EXPLICIT,
+        "layer": MemoryLayer.PREFERENCE, "key": "detail_preference", "value": value,
+        "normalized_value": value, "confidence": 0.95, "authority": Authority.USER_EXPLICIT,
         "valid_from": NOW, "observed_at": NOW, "source_turn_ids": [turn_id],
-        "metadata": {"evidence": "I generally prefer concise answers."},
+        "metadata": {"evidence": evidence},
     }
     payload.update(changes)
     return MemoryRecord.model_validate(payload)

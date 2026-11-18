@@ -5,6 +5,9 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+from .evidence_polarity import (
+    COUNTER, UNRELATED, is_one_off_instruction, preference_quote_alignment,
+)
 from .models import AllowedUse, Authority, MemoryLayer, MemoryRecord, Sensitivity
 from .settings import PROFILE_POLICY_VERSION
 
@@ -132,6 +135,7 @@ def _profile_source_is_eligible(record: MemoryRecord) -> bool:
         and record.metadata.get("evidence_kind") not in {
             "current_state", "current_task", "contextual_preference",
         }
+        and not is_one_off_instruction(str(record.metadata.get("evidence", record.value)))
     )
 
 
@@ -147,6 +151,22 @@ class ProfileEvidenceExtractor:
             mapped = self._map_record(record)
             if not mapped:
                 continue
+            # The direction comes from the quoted user text, not from the
+            # key/value alone: a correction can reject the very value it names.
+            quote = str(record.metadata.get("evidence", record.value))
+            alignment = preference_quote_alignment(quote, record.key, record.value)
+            if alignment == UNRELATED:
+                continue
+            if alignment == COUNTER:
+                # A negated preference counters its own value; never turn the
+                # negation into support for the opposite value.
+                mapped = [
+                    (dimension, value, weight, COUNTER)
+                    for dimension, value, weight, polarity in mapped
+                    if polarity == "support"
+                ]
+                if not mapped:
+                    continue
             # A merged record can contain several historical turns but only one
             # quote. Do not manufacture independent evidence from that aggregate.
             source_turns = set(record.source_turn_ids)
@@ -242,7 +262,15 @@ def is_supported_profile_evidence(evidence: ProfileEvidence, source: MemoryRecor
         return False
     claims = {(dimension, value) for dimension, value, _weight, _polarity
               in ProfileEvidenceExtractor()._map_record(source)}
-    return (evidence.dimension, evidence.value) in claims
+    if (evidence.dimension, evidence.value) not in claims:
+        return False
+    quote = str(source.metadata.get("evidence", source.value))
+    alignment = preference_quote_alignment(quote, source.key, source.value)
+    if alignment == UNRELATED:
+        return False
+    if alignment == COUNTER and evidence.polarity == "support":
+        return False
+    return True
 
 
 class ProfileAccumulator:
