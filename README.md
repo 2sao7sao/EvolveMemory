@@ -18,6 +18,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-ff5aa5" alt="MIT license" /></a>
 </p>
 
+**Live-trial update:** [Draft PR #17](https://github.com/2sao7sao/EvolveMemory/pull/17) connects a real DeepSeek host. The 24-turn trial recovered old project decisions but failed preference correction internally; [actual excerpts and remaining P0 defects](https://github.com/2sao7sao/EvolveMemory/blob/feat/live-project-continuation-20261116/docs/live-evaluation-results.md) are separate from rule-test success. PR #17 is not merged; historical no-provider claims below describe the PR #16 baseline.
+
 ## Why EvolveMemory
 
 Long-term collaboration needs more than recalling facts: an assistant should learn stable preferences, recognize change and context, and respond naturally after correction. EvolveMemory explores that experience with inspectable evidence, memory updates, and controls. Project-task continuation is the first test scenario; long-term collaboration and companionship are the vision.
@@ -105,7 +107,7 @@ The merged [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) baseline p
 
 | Resource | Purpose |
 | --- | --- |
-| [Conversation-memory protocol](https://github.com/2sao7sao/EvolveMemory/pull/12) | Autonomous understanding, source/scope boundaries, delivery capture, and fixed experience acceptance; the full protocol is not complete. |
+| [Conversation-memory protocol](docs/conversation-memory-invocation-spec.md) | Autonomous understanding, source/scope boundaries, delivery capture, and fixed experience acceptance; the full protocol is not complete. |
 | [Runtime reference](docs/runtime-reference.md) | Retrieval math, activation, causal relevance, write governance, Python and HTTP surfaces. |
 | [Adaptive replay walkthrough](examples/adaptive_memory_replay.md) | Inputs, outputs, and what each seeded check establishes. |
 | [Maintenance notes](docs/maintenance.md) | Current evidence, prioritized follow-up, and visual asset inventory. |
