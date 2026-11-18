@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .gating import MemoryGateResult, MemoryUseAction
-from .models import PromptVisibility
+from .models import MemoryLayer, PromptVisibility, memory_item_layer
 from .schema import MemoryItem, ResponsePolicy
 
 
@@ -18,6 +18,7 @@ class CompiledMemoryContext:
     suppressed_count: int = 0
     response_policy: dict[str, Any] = field(default_factory=dict)
     audit_debug: dict[str, Any] = field(default_factory=dict)
+    source_notes: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -29,6 +30,7 @@ class CompiledMemoryContext:
             "suppressed_count": self.suppressed_count,
             "response_policy": self.response_policy,
             "audit_debug": self.audit_debug,
+            "source_notes": self.source_notes,
         }
 
 
@@ -53,6 +55,7 @@ class ContextCompiler:
                 "query": query,
             },
         )
+        context.source_notes = self.provider_candidates(gate_result)
         for decision in gate_result.decisions:
             line = self._memory_line(decision.memory)
             if decision.action == MemoryUseAction.USE_DIRECTLY:
@@ -80,6 +83,37 @@ class ContextCompiler:
             context.style_policy.append(self._style_line(preference))
         context.style_policy = list(dict.fromkeys(context.style_policy))
         return context
+
+    def provider_candidates(self, gate_result: MemoryGateResult) -> list[dict[str, Any]]:
+        """Project the gate snapshot into provider-safe data, never raw audit records."""
+        result = []
+        for decision in gate_result.decisions:
+            if decision.action == MemoryUseAction.SUPPRESS:
+                continue
+            raw = decision.memory.to_dict()
+            item = {key: raw.get(key) for key in
+                    ("memory_id", "key", "type", "authority", "source_turn_ids", "valid_from", "valid_to")}
+            item["use_action"] = decision.action.value
+            direct = (decision.prompt_visibility == PromptVisibility.VISIBLE
+                      and decision.safe_to_mention
+                      and decision.action in {MemoryUseAction.USE_DIRECTLY,
+                          MemoryUseAction.FOLLOW_UP, MemoryUseAction.CLARIFY})
+            if direct:
+                item.update(value=raw.get("value"), evidence=raw.get("evidence"))
+                item["assertion"] = {"key": raw["key"], "value": raw["value"]}
+            elif decision.action == MemoryUseAction.SUMMARIZE_ONLY:
+                item["value"] = f"Use only as aggregate context, do not mention details: {decision.memory.key}"
+            else:
+                item["value"] = self._style_line(decision.memory)
+            # Ordinary preference values are already represented by the style policy.
+            # Preserve their exact meaning for correction checks instead of treating
+            # added presentation advice (e.g. warmth) as something the user said.
+            if (memory_item_layer(decision.memory) == MemoryLayer.PREFERENCE
+                    and decision.memory.sensitivity in {"public", "personal"}
+                    and decision.action in {MemoryUseAction.STYLE_ONLY, MemoryUseAction.HIDDEN_CONSTRAINT}):
+                item["assertion"] = {"key": raw["key"], "value": raw["value"]}
+            result.append(item)
+        return result
 
     def render_prompt_sections(self, context: CompiledMemoryContext, query: str) -> str:
         return "\n\n".join(

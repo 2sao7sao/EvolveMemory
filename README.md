@@ -27,12 +27,12 @@ Long-term collaboration needs more than recalling facts: an assistant should lea
 | Capability | Available scope |
 | --- | --- |
 | Form and revise understanding | Evidence accumulation and correction exist; this revision enables automatic profile adaptation from independent source turns. The U0 rule and API slice passes local checks; user experience remains unverified. |
-| Govern writes | Rule extraction and external LLM payload validation; create, merge, review when configured, reject, or retain only for the current turn. |
+| Govern writes | Rule extraction or real-model proposals through validated `llm_payload`; create, merge, review when configured, reject, or retain only for the current turn. |
 | Control use | Gate retrieved memories into direct facts, style policy, follow-up cues, hidden constraints, clarification, summary, or suppression. |
 | Correct and inspect | Local JSON / SQLite stores, review queue, correction, deletion, forget-all, and audit export. |
-| Reproduce behavior | Offline replay and deterministic regression suites, with inspectable scoring factors. |
+| Reproduce behavior | Offline replay and regression suites, plus a bounded DeepSeek conversation host that records actual requests, replies, and memory decisions. |
 
-This is a research prototype using rules and externally supplied `llm_payload`, not an integrated model provider. On 2026-11-16 the user replaced the earlier confirmed-only profile rule: supported ordinary preferences should adapt automatically, while weak evidence stays tentative without default confirmation questions. Settings, scope, source validity, and opt-out remain effective. A complete multi-turn host, broad stable/change/context reasoning, and the intended natural experience are not yet validated.
+This research prototype includes a real DeepSeek provider and a bounded multi-turn host, alongside the offline rule runtime. On 2026-11-16 the user replaced the earlier confirmed-only profile rule: supported ordinary preferences should adapt automatically, while weak evidence stays tentative without default confirmation questions. Settings, scope, source validity, and opt-out remain effective. Real-model project continuation is under evaluation; broad stable/change/context reasoning and the intended natural experience are not yet accepted.
 
 ## Quick start
 
@@ -57,6 +57,21 @@ python -m uvicorn app:app --reload
 
 Open `http://127.0.0.1:8000/docs` for the API reference. See the [runtime reference](docs/runtime-reference.md#developer-surface) for SQLite configuration and Python usage.
 
+### Live DeepSeek conversation
+
+After installing the dependencies, run the 24-turn **synthetic user script with real `deepseek-flash` responses**. The runner starts its own local API and compares memory-enabled and recent-context-only conversations:
+
+```bash
+python examples/run_live_conversation.py \
+  --api-key-file /absolute/private/path/deepseek-key.txt \
+  --model deepseek-flash \
+  --output data/live-runs/run-01
+```
+
+Point to an existing private key file; do not copy the key into the repository or command text. The output directory must be new or empty. Defaults are **150 logical provider calls** and a **US$2 estimated-cost guard**, not a provider billing cap; retries and failed calls may also be billed. This command makes paid external model calls. See the [live-run contract](docs/runtime-reference.md#live-deepseek-conversation) for optional arguments, boundaries, and artifacts.
+
+Open `data/live-runs/run-01/transcript.html` or `transcript.md` after the run. Per-turn JSON, `provider_calls.jsonl`, and `manifest.json` preserve the actual delivered context, raw replies, failures, usage, and cost estimate. A completed run is evidence of execution, not acceptance of natural understanding.
+
 ## How it works
 
 ```text
@@ -67,7 +82,7 @@ feedback → correction / retirement → audit
 
 <img src="assets/runtime_contract_map_v2.svg" alt="Memory runtime modes: observe, write, retrieve, adapt, correct, and audit" width="100%" />
 
-The use gate controls what enters the prompt; a retrieval score alone never grants permission. Current semantic scoring uses a deterministic hash embedding substitute. See [scoring and API details](docs/runtime-reference.md), [gate rules](docs/gate-decision-rules.md), and the [architecture proposal](docs/next-development-spec.md).
+The use gate controls what enters the prompt; a retrieval score alone never grants permission. The live host keeps the last two user/assistant pairs and clears them on session changes. It extracts proposals, validates evidence and retention, writes through v2 governance, retrieves up to 50 governed candidates, asks the model to select at most 10 IDs, then rechecks those IDs through the same governed query and prompt paths before answering. This does not retrieve raw past conversations. The initial candidate ranking still uses a deterministic hash embedding substitute. See [scoring and API details](docs/runtime-reference.md), [gate rules](docs/gate-decision-rules.md), and the [architecture proposal](docs/next-development-spec.md).
 
 ## Reproduce the example
 
@@ -88,7 +103,9 @@ python -m unittest discover -s tests -p 'test_*.py'
 python -m evals.runner --suite all
 ```
 
-The merged [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) baseline passed 115 local tests (72 pytest subtests), all 11 deterministic suites, the standalone replay, and [hosted CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401). Those results cover the earlier controls/scope implementation, including its now-superseded profile-confirmation rule. **This revision passed 157 local tests (101 pytest subtests), all 11 deterministic suites, and replay PASS**, using an isolated temporary data directory and no provider. Implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). These checks complete the local U0 slice, not experience acceptance U01–U08, a complete host, or real-model helpfulness. See [maintenance evidence](docs/maintenance.md).
+The merged [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) baseline passed 115 local tests (72 pytest subtests), all 11 deterministic suites, the standalone replay, and [hosted CI](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401). Those results cover the earlier controls/scope implementation, including its now-superseded profile-confirmation rule. The subsequent **PR #16 U0 baseline passed 157 local tests (101 pytest subtests), all 11 deterministic suites, and replay PASS**, using an isolated temporary data directory and no provider; see [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). Those historical checks do not validate the new live host or establish experience acceptance U01–U08. Real-run transcripts and request traces must be assessed separately for useful recall, correction, and natural adaptation. See [maintenance evidence](docs/maintenance.md).
+
+Latest live trial: 24 turns per arm recovered the old decision and corrected participant scope, but a negated preference reinforced an incorrect profile and state fields failed validation. **Project-fact continuation improved; preference correction failed.** The final code passed 205 tests / 165 subtests and all 11 deterministic suites. See [actual excerpts, every run and priority failures](docs/live-evaluation-results.md); engineering checks do not establish experience acceptance.
 
 ## Status and roadmap
 
@@ -97,9 +114,9 @@ The merged [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) baseline p
 | Priority | Next step | Completion evidence |
 | --- | --- | --- |
 | U0 — locally checked | Automatic, evidence-backed profile adaptation | Local rules/API regressions pass; remote publication and user-experience acceptance remain separate. |
-| Next: S1-a / S0-c | Minimal host and temporary context | Actual delivered input and subsequent answers respect current requests, corrections, and existing scope. |
+| S1-a / S0-c — under evaluation | Real-provider bounded host, temporary retention, and governed model selection are implemented | Inspect delivered input and subsequent answers for current-request priority, correction, and scope; implementation is not experience acceptance. |
 | S1 experience | A useful project-task continuation | Recover old decisions, change after correction, and avoid repetitive reminders or irrelevant events. |
-| S2–S4 | Lasting understanding and real-provider evaluation | Distinguish stable preferences, persistent change, and contextual exceptions; measure helpfulness and correction effort over time. |
+| S2–S4 | Lasting understanding and longitudinal real-model evaluation | Distinguish stable preferences, persistent change, and contextual exceptions; measure helpfulness and correction effort over time. |
 
 [Draft PR #12](https://github.com/2sao7sao/EvolveMemory/pull/12) records the revised direction and remaining protocol. The first project scenario does not reduce the vision to task tracking. See [positioning](docs/positioning.md), the [development plan](docs/next-development-spec.md), and [experience acceptance U01–U08](docs/next-development-spec.md#fixed-experience-acceptance) for the distinction between vision, implementation, and unverified behavior.
 

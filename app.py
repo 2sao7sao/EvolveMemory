@@ -31,7 +31,10 @@ from memory_system.models import (
     MemoryStatus,
     Sensitivity,
 )
-from memory_system.profiles import ProfileAccumulator, ProfileEvidenceExtractor, is_user_corrected_profile
+from memory_system.profiles import (
+    ProfileAccumulator, ProfileEvidenceExtractor, is_user_corrected_profile,
+    is_supported_profile_evidence,
+)
 from memory_system.registry import MemorySlotRegistry
 from memory_system.retrieval import HybridMemoryScorer, RetrievalPlan, RetrievalPlanner
 from memory_system.schema import MemoryItem, MemoryType, ResponsePolicy, StateDynamics
@@ -91,6 +94,10 @@ class V2IngestTurnRequest(BaseModel):
 class V2QueryOptions(BaseModel):
     max_prompt_memories: int = Field(8, ge=1, le=50)
     include_debug: bool = False
+    candidate_memory_ids: list[str] | None = Field(
+        None, max_length=50,
+        description="Optional subset of governed visible memories; an empty list selects none.",
+    )
 
 
 class V2MemoryQueryRequest(BaseModel):
@@ -494,6 +501,14 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
         role=request.role,
         turn_id=turn_id,
     )
+    llm_payload = request.options.llm_payload or request.llm_payload or {}
+    retractions = llm_payload.get("memory_retractions", [])
+    if not isinstance(retractions, list) or len(retractions) > 10:
+        raise HTTPException(status_code=422, detail="memory_retractions must be a list of at most 10 items.")
+    def denied_retractions(reason: str) -> list[dict]:
+        return [{"memory_id": item.get("memory_id") if isinstance(item, dict) else None,
+                 "status": "rejected", "reason": reason, "retired_profile_ids": []}
+                for item in retractions]
     if request.role != "user" or not request.options.extract_memory:
         return {
             "turn_id": turn_id,
@@ -511,6 +526,8 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
             "write_decisions": [],
             "operations": [],
             "event_states": [],
+            "memory_retractions": denied_retractions("user_extraction_required"),
+            "retraction_conflicts": [],
             "active_memory_delta": {
                 "created": 0,
                 "updated": 0,
@@ -519,8 +536,7 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
             },
         }
     if request.options.extractor == "llm_payload":
-        llm_payload = request.options.llm_payload or request.llm_payload
-        if llm_payload is None:
+        if request.options.llm_payload is None and request.llm_payload is None:
             raise HTTPException(status_code=422, detail="llm_payload is required when extractor='llm_payload'.")
         try:
             candidates = LLMMemoryProposalExtractor().parse_response_payload(
@@ -542,12 +558,59 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
         candidate.project_id = request.project_id if scope != "global" else None
         candidate.domain = request.domain if scope != "global" else None
         candidate.scope = scope
+    can_v2_autowrite = settings.memory_enabled and request.options.auto_write and temporary_scope is None and preprocessed_turn.memory_command not in {
+        MemoryCommand.DO_NOT_REMEMBER,
+        MemoryCommand.FORGET,
+    }
+    retraction_results: list[dict] = []
+    retracted_sources: list[MemoryRecord] = []
+    if retractions and (not can_v2_autowrite or request.options.extractor != "llm_payload"):
+        retraction_results = denied_retractions("retraction_write_not_authorized")
+    elif retractions:
+        owner = MemoryRecord(
+            user_id=user_id, session_id=request.session_id,
+            project_id=request.project_id if scope != "global" else None,
+            domain=request.domain if scope != "global" else None, scope=scope,
+            layer=MemoryLayer.SEMANTIC_FACT, key="retraction_scope", value=None,
+            confidence=1.0, valid_from=timestamp, observed_at=timestamp,
+        )
+        for item in retractions:
+            if (not isinstance(item, dict) or not isinstance(item.get("memory_id"), str)
+                    or not item["memory_id"].strip()):
+                retraction_results.append({"memory_id": None, "status": "rejected",
+                    "reason": "invalid_retraction", "retired_profile_ids": []})
+                continue
+            result = normalized_repository.retract_memory_source(
+                item["memory_id"], owner=owner, turn_id=turn_id, text=request.text,
+                evidence=item.get("evidence"), reason=item.get("reason"), created_at=timestamp,
+            )
+            retraction_results.append(result)
+            if result["status"] in {"retired", "already_retracted"}:
+                retracted_sources.append(normalized_repository.get_record(item["memory_id"]))
+    # A retraction and a fresh proposal are a single turn, not competing writes.
+    # Never re-add the exact assertion that this turn just withdrew, including retries.
+    conflict_operations = []
+    retraction_conflicts = []
+    accepted_candidates = []
+    for candidate in candidates:
+        source = next((source for source in retracted_sources
+            if source.same_scope_as(candidate) and source.layer == candidate.layer
+            and source.key == candidate.key and (source.value == candidate.value
+                or source.normalized_value == candidate.normalized_value)), None)
+        if source is None:
+            accepted_candidates.append(candidate)
+        else:
+            retraction_conflicts.append({"memory_id": str(source.id), "key": candidate.key,
+                                        "reason": "retracted_value_reproposed"})
+            conflict_operations.append(MemoryOperation(operation=MemoryOperationType.REJECT,
+                candidate=candidate, target_memory_id=source.id, score=0,
+                reason="retracted_value_reproposed"))
     existing_records = scoped_v2_records(
         normalized_repository, user_id=user_id, session_id=request.session_id,
         project_id=request.project_id, domain=request.domain, settings=settings,
     )
-    operations = MemoryOperationPlanner().plan(
-        candidates,
+    planned_operations = MemoryOperationPlanner().plan(
+        accepted_candidates,
         existing_records,
         WritePolicyContext(
             user_command=(
@@ -559,13 +622,10 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
             scope=temporary_scope,
         ),
     )
-    event_states = EventSkillRegistry().detect(candidates)
-    can_v2_autowrite = settings.memory_enabled and request.options.auto_write and temporary_scope is None and preprocessed_turn.memory_command not in {
-        MemoryCommand.DO_NOT_REMEMBER,
-        MemoryCommand.FORGET,
-    }
+    operations = planned_operations + conflict_operations
+    event_states = EventSkillRegistry().detect(accepted_candidates)
     persisted_records = (
-        normalized_repository.apply_operations(operations, created_at=timestamp)
+        normalized_repository.apply_operations(planned_operations, created_at=timestamp)
         if can_v2_autowrite
         else []
     )
@@ -610,6 +670,7 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
     evidence_pool = [
         evidence for evidence in normalized_repository.list_profile_evidence(user_id=user_id)
         if str(evidence.source_memory_id) in allowed_sources
+        and is_supported_profile_evidence(evidence, allowed_sources[str(evidence.source_memory_id)])
     ] if profile_evidence else []
     profile_candidates = []
     qualified_profile_ids = set()
@@ -651,6 +712,8 @@ def v2_ingest_turn(user_id: str, request: V2IngestTurnRequest) -> dict[str, Any]
         "persisted_event_states": [
             event.model_dump(mode="json") for event in persisted_event_states
         ],
+        "memory_retractions": retraction_results,
+        "retraction_conflicts": retraction_conflicts,
         "profile_evidence": [item.to_dict() for item in profile_evidence],
         "profile_candidates": [record_to_dict(record) for record in profile_candidates],
         "profile_operations": [
@@ -679,10 +742,11 @@ def revalidate_autonomous_profiles(repository: Any, records: list[MemoryRecord],
                 or is_user_corrected_profile(record)):
             kept.append(record)
             continue
-        source_ids = {str(source.id) for source in records
-                      if source.layer != MemoryLayer.INFERRED_PROFILE and source.same_scope_as(record)}
-        pool = [item for item in evidence if str(item.source_memory_id) in source_ids
-                and item.observed_at <= timestamp]
+        sources = {str(source.id): source for source in records
+                   if source.layer != MemoryLayer.INFERRED_PROFILE and source.same_scope_as(record)}
+        pool = [item for item in evidence if str(item.source_memory_id) in sources
+                and item.observed_at <= timestamp
+                and is_supported_profile_evidence(item, sources[str(item.source_memory_id)])]
         current = next((item for item in ProfileAccumulator().accumulate(pool, now=timestamp)
                         if item.autonomous_qualified and item.dimension == record.key and item.value == record.value), None)
         if current is not None:
@@ -702,7 +766,8 @@ def revalidate_autonomous_profiles(repository: Any, records: list[MemoryRecord],
 
 def prepare_v2_query(user_id: str, request: V2MemoryQueryRequest) -> tuple[SessionMemoryRuntime, dict[str, Any], dict[str, Any]]:
     timestamp = normalize_timestamp(request.timestamp)
-    plan = RetrievalPlanner().plan(request.query, max_prompt_memories=request.options.max_prompt_memories)
+    plan = RetrievalPlanner().plan(request.query, max_prompt_memories=request.options.max_prompt_memories,
+                                   project_context=request.project_id is not None)
     repository = build_normalized_repository()
     settings = repository.get_user_settings(user_id)
     runtime = SessionMemoryRuntime()  # Never implicitly load a legacy session.
@@ -722,6 +787,12 @@ def prepare_v2_query(user_id: str, request: V2MemoryQueryRequest) -> tuple[Sessi
                    or record.metadata.get("user_review_approved") is not True
                    or all(source in visible_ids for source in record.metadata.get("source_memory_ids", []))]
         records = revalidate_autonomous_profiles(repository, records, user_id=user_id, timestamp=timestamp)
+        if request.options.candidate_memory_ids is not None:
+            # A host/model selection may only narrow the fully governed snapshot.
+            # Revalidate profiles against all live sources before this intersection:
+            # choosing a profile need not also place its evidence in the prompt.
+            selected_ids = set(request.options.candidate_memory_ids)
+            records = [record for record in records if str(record.id) in selected_ids]
         if plan.include_layers:
             records = [record for record in records if record.layer in plan.include_layers]
         visible_ids = {record.id for record in records}
@@ -746,6 +817,7 @@ def v2_memory_query(user_id: str, request: V2MemoryQueryRequest) -> dict[str, An
     _, result, plan = prepare_v2_query(user_id, request)
     return {
         "retrieval_plan": plan, "candidates": result["relevant_memories"],
+        "model_candidates": result["compiled_context"]["source_notes"],
         "gate": result["memory_gate"], "compiled_context": result["compiled_context"],
         "response_policy": result["response_policy"],
     }

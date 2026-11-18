@@ -82,7 +82,9 @@ class QueryIntentClassifier:
 
 
 class RetrievalPlanner:
-    def plan(self, query: str, *, max_prompt_memories: int) -> RetrievalPlan:
+    def plan(
+        self, query: str, *, max_prompt_memories: int, project_context: bool = False,
+    ) -> RetrievalPlan:
         intent = QueryIntentClassifier().classify(query)
         modes = [
             "normalized_sqlite",
@@ -149,6 +151,17 @@ class RetrievalPlanner:
         elif intent.name == "memory_management":
             include_layers = []
             reasons.append("memory-management queries need broad inspection")
+        if project_context and include_layers:
+            # Any project request can depend on prior facts, even when a generic
+            # word makes the heuristic classifier label it a style request.
+            # Empty layer lists already mean all layers and must stay broad.
+            # Scope/settings remain the caller's responsibility; selection and
+            # the use gate still decide which candidates reach the prompt.
+            for layer in (MemoryLayer.SEMANTIC_FACT, MemoryLayer.PROCEDURAL_MEMORY,
+                          MemoryLayer.WORKING_MEMORY):
+                if layer not in include_layers:
+                    include_layers.append(layer)
+            reasons.append("host project context retains factual, procedural and working-memory candidates")
         return RetrievalPlan(
             intent=intent,
             retrieval_modes=modes,

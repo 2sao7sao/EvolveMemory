@@ -2,13 +2,13 @@
 
 [返回 README](../README.zh-CN.md) · [English](runtime-reference.md)
 
-以下公式与接口描述确定性原型。模块存在不等于完整宿主对话链路已经接通，也不代表真实模型收益已经测量。
+本文描述确定性记忆治理与可选的真实 DeepSeek 对话宿主。宿主会记录实际模型输入输出；模块存在不代表自然理解已经验收，也不代表跨用户、跨任务的真实模型收益已经测量。
 
 ## 2026-11-16 自主理解方向修正
 
 用户在 2026-11-16 后续明确取代了“所有个人画像先确认才适配”的旧选择。当前方向是：AI 从独立证据中自主形成并持续修正对人的理解；普通偏好证据充分时可自动入库，并在相关对话中自然适配，不逐项索取画像确认。弱证据暂存为假设或不使用，不默认转成提问。长期协作与陪伴是愿景，项目任务是首个验证场景。
 
-本修订 U0 的规则/API 切片本地通过：**pytest 157 tests + 101 subtests**、**unittest 157 tests**、**11/11 确定性套件**（`failures=[]`）及 **replay PASS**，使用独立临时数据目录，未调用 provider。实现与远端 Checks 见 [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16)；PR #15 历史证据单独保留。目前仍由规则和外部 `llm_payload` 提供候选；尚未证明真实 provider 或完整多轮宿主的自然体验。
+PR #16 的 U0 基线本地通过：**pytest 157 tests + 101 subtests**、**unittest 157 tests**、**11/11 确定性套件**（`failures=[]`）及 **replay PASS**，使用独立临时数据目录，未调用 provider。见 [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16)；PR #15 历史证据单独保留。这些历史数量不验证后来新增的真实宿主。当前候选可以来自规则、外部 `llm_payload` 或[真实 DeepSeek 宿主](#live-deepseek-conversation)；宿主将模型输出提交到同一 v2 治理写入入口。自然多轮体验仍在评估。
 
 | 方面 | 修正后的契约 |
 | --- | --- |
@@ -23,7 +23,7 @@
 
 ### 当前候选实现的具体边界
 
-下列 U0 行为已实现，并由上述本地检查覆盖；U01–U08 实际体验尚未验收，下一步是 S1-a 最小宿主与临时上下文：
+下列 U0 行为已实现，并由上述历史本地检查覆盖；U01–U08 实际体验尚未验收。当前 S1-a 宿主新增真实模型交付和临时保留期限校验，用于进一步评估：
 
 | 机制 | 当前行为与限制 |
 | --- | --- |
@@ -38,7 +38,7 @@
 
 ## PR #15 控制与 scope 基础
 
-以下记录 **PR #15 的控制与 scope 基础**。画像策略由上节修正；其余存储与范围边界继续保留。完整 S1 宿主、真实模型调用、交付回执及并发撤销保证仍未完成。这里的范围限制用于本地原型，不等于生产认证或多租户隔离已经验证。
+以下记录 **PR #15 的控制与 scope 基础**。画像策略由上节修正；其余存储与范围边界继续保留。当前有限窗口宿主已增加真实模型调用和请求记录，但这些记录不是用户收件回执或并发撤销保证；完整 S1 体验尚未验收。这里的范围限制用于本地原型，不等于生产认证或多租户隔离已经验证。
 
 2026-11-16 本地结果：pytest **115 passed、72 subtests passed**；unittest **115 passed**；确定性 eval **11/11**、无失败；adaptive replay **PASS**。独立本地复核未发现本切片范围内的阻断项。这些历史结果属于 [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15)，已合并至 `8e3ab17` 且[远端 CI 通过](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401)。它们不验证本修订的自动理解改动。
 
@@ -56,6 +56,8 @@ v2 使用 normalized repository 作为唯一读写来源。`turns/ingest` 不再
 | Ingest `session_id`, `project_id`, `domain` | 由可信宿主提供当前范围；不由 query 自行猜测授权。 |
 | Ingest `memory_scope` | 可为 `turn/session/project/domain/global`；未指定时为 `session`。自然语言仅可收窄为临时 turn/session，不能扩大项目或全局分享。 |
 | Query / prompt-context `session_id`, `project_id`, `domain` | session 记录按 session 与 project 精确匹配；`None` 表示未绑定值，不表示全用户搜索。 |
+| Query / prompt-context `options.candidate_memory_ids` | 可选，最多 50 个 ID；在设置、scope、时间与画像来源复核之后，layer 过滤和评分之前求交集。省略或 `null` 不增加 ID 限制；`[]` 不选择任何存储记忆，本轮偏好仍生效。 |
+| Query / prompt-context `options.max_prompt_memories` | 1–50 的整数，限制返回/门控后的记忆数量。真实宿主请求最多 50 条作为模型选择池；最终用最多 10 个选中 ID、上限 12 条重新读取并交付。 |
 | Settings `enabled_project_ids` | 默认 `[]`；project scope 读写须先开启相应项目。 |
 | Settings `allow_global_memory` | 默认 `false`；global scope 读写须单独开启。 |
 | Domain scope | 需显式 domain；携带 project 时，该项目也须已开启。 |
@@ -80,6 +82,8 @@ v2 使用 normalized repository 作为唯一读写来源。`turns/ingest` 不再
 ```
 
 同项目后续 query 可使用 `{"session_id":"thread-A2","project_id":"project-A","query":"在本项目中怎么回答代码 review 问题？"}`。`project-B` 或未绑定 project 不继承 A 的权限；相关度与文字中的“全局”不能打开分享范围。
+
+可信宿主可在 query 或 prompt 请求中使用 `"options":{"candidate_memory_ids":["<受控查询返回的ID>"],"max_prompt_memories":12}` 收窄范围。ID 不能恢复禁用、删除、过期、尚未生效或越界的记录，也不绕过使用门控。显式 `project_id` 会保留项目事实/流程候选，即使风格关键词导致启发式意图误分类；它本身不授予该项目权限。query 与 prompt 各自重新检查当前受控快照，不保证生成期间状态变化的原子性。
 
 ### 画像证据、事件追问与复核
 
@@ -350,12 +354,61 @@ context = runtime.prompt_context("帮我 review 这段代码。", now)
 print(context["assembled_prompt"])
 ```
 
+## Live DeepSeek conversation
+
+`memory_system/providers.py` 提供纯文本 `ChatClient`；`memory_system/conversation.py` 提供 `ConversationHost` 和 v2 HTTP gateway。`examples/run_live_conversation.py` 将固定的 24 轮[合成场景](../examples/scenarios/project_continuation_zh.json)交给真实 `deepseek-flash`。用户文本是预编脚本，助手回答是未经改写的模型输出。这是可复现的集成实验，不是真实用户研究，也不证明 U01–U08 已验收。[评价标准](live-evaluation-rubric.md)只用于离线评审，不传给模型。
+
+完成 README 的依赖安装后运行：
+
+```bash
+python examples/run_live_conversation.py \
+  --api-key-file /absolute/private/path/deepseek-key.txt \
+  --model deepseek-flash \
+  --output data/live-runs/run-01
+```
+
+使用仓库外已有私有密钥文件的路径，不把内容复制进源码、对话或命令参数。也支持已有的 `DEEPSEEK_API_KEY` 环境变量；文件有多个密钥时用 `--key-index` 选择。runner 只把凭据交给 provider client，从本地 memory server 的环境中移除 `DEEPSEEK_API_KEY`，不复制密钥文件到运行产物。请求日志不含 Authorization header，但含对话内容，应保持私有。
+
+runner 自行启动仅监听 loopback 的 API，使用新的合成用户并明确开启场景项目，SQLite 保存在运行目录，无需另开 API。`--output` 必须不存在或为空，以保留之前成功和失败的证据。`data/live-runs/` 已被 Git 忽略。可用 `--max-turns 2` 进行短程付费冒烟检查，但部分运行不能证明后期轮次召回。
+
+### 模型与记忆边界
+
+| 阶段 | 契约 |
+| --- | --- |
+| 近期上下文 | `memory` 和 `recent_only` 两组都最多保留最近两组用户/助手对话，切换 session 时清空。只有记忆组能跨 session 复用已授权的项目记录。 |
+| 抽取 | 模型接收当前用户文本、有限近期上下文、允许的记忆摘要、偏好 slots 与输出 schema。evidence 必须是当前用户文本的连续原文；助手背景不等于用户授权。这种子串校验不证明语义蕴含。 |
+| 语义复核 | 对同一模型再作一次独立调用，判断支持/反证、当前任务/持久偏好与情境。它仍可能判断错误，不是语义正确性证明。缺失/重复判断不默认支持；只有确实支持且可持久化的提案继续。情境偏好不能伪装为直接事实或无条件枚举。 |
+| 旧断言撤回 | 复核器可用当前原文证据和已授权候选ID提出 `memory_retractions`。ingest再次检查用户、精确scope、设置、角色、时间与写入开关；在一个数据库事务内退役旧preference/semantic断言及依赖它的自动画像，保留历史证据和审计，阻止同轮重新加回与重试重复审计。直接撤画像被拒绝，不会顺带删除其所有源。 |
+| 保留期限 | 宿主要求输出 `durable`、`state` 或 `turn`，缺失/无效 retention 会被拒绝；`turn` 不进入 ingest，`state` 和 `current_bandwidth` 必须有含时区且晚于当前时间的 `valid_to`。提示词建议短状态通常不超过 48 小时；校验器约束未来到期，不强制 48 小时上限。自然语言临时范围还可进一步收窄持久化。 |
+| 偏好校验 | 常规偏好使用 registry key 和枚举值；`current_bandwidth` 仅接受 `busy` 或 `available`。`contextual_` 前缀偏好可保存带情境条件的文字规则。模型直接写画像会被拒绝；非明确自述的 confidence 在进入受控证据积累前最多为 0.75。 |
+| 候选池 | ingest 后受控查询返回最多 50 条候选；模型只接收 `model_candidates` 门控安全投影，不把 policy/summary-only 依据恢复为原文。候选已执行设置、scope、时间、画像来源、确定性排序与使用门控。这是有限候选池，不是完整历史或全库语义搜索。 |
+| 模型选择 | 模型从池中选最多 10 个不同 ID；未知 ID 被拒绝，格式错误时空选，不回退为使用全部记忆。选择器不接收预期答案或评价标准。 |
+| 最终上下文 | 同一 ID 子集再次进入 query 和 prompt-context 的治理检查。回答模型收到编译后的 Prompt、同一次最终 prompt-context 快照内的门控安全 `source_notes`、有限近期上下文及当前问题；不用审计导出或过去原始会话全文回答。 |
+| 控制 | 模型选择只能收窄范围，不能开启 project/global 分享、恢复过期或删除记录、绕过当前要求与最终使用门控。请求留痕不证明并发撤销或用户已收到生成答案。 |
+
+抽取和选择都是真实模型调用，仍可能判断错误。枚举校验、证据匹配与确定性治理用于约束决策，不等于广泛情境理解。可见记录超过上限时，初始排序仍可能遗漏相关事实。判断记忆收益前，需检查保存的候选池、选中 ID 与实际回答请求。
+
+### 限额与证据产物
+
+默认 `--max-calls 150`、`--max-cost-usd 2.0`。调用数量统计逻辑 completion，不逐次统计 HTTP 重试；此 runner 的 client 允许每次逻辑调用重试一次。费用保护使用输入/输出用量估算和下一次调用预留估算，不是账号账单硬限制。`estimated_peak_cost_usd` 使用 runner 固定的 `deepseek-flash` 全部输入按缓存未命中计算的费率，**不是账单**；重试或失败请求也可能另行收费。runner 会拒绝其他模型名，其他模型需要另行配置费率假设。
+
+| `--output` 下的产物 | 证据 |
+| --- | --- |
+| `transcript.html`、`transcript.md` | 两组的用户脚本与原始助手回答，包括未完成运行。 |
+| `01-memory.json`、`01-recent_only.json` 等 | 各轮适用的抽取、校验/拒绝、ingest、受控候选池、模型选择、最终 query/prompt、实际回答请求与回复。 |
+| `provider_calls.jsonl` | 逻辑调用的实际 request body、回复、用量、模型、延迟和经过处理的失败信息，不含 Authorization header。 |
+| `started.json`、`manifest.json` | 源码/场景/评价标准哈希、commit、时间、完成/错误计数、用量与费用估算。 |
+| `scenario.json`、`data/memory.sqlite3`、`memory-server.log` | 确切输入脚本与独立的本地运行时状态/日志。 |
+| `memory-export.json`、`settings.json` | 成功运行到导出阶段才产生的最终记忆与设置快照，不作为回答输入。 |
+
+应按固定标准评审实际回答；HTTP 成功或召回条数增多不证明有用召回、自然适配或用户认可。保留失败运行，每次重跑使用新目录。
+
 ## API Surface
 
 | Endpoint | 作用 |
 | --- | --- |
-| `POST /v2/users/{user_id}/turns/ingest` | 摄取用户 turn 或 provider-free LLM proposal payload。 |
-| `POST /v2/users/{user_id}/memory/query` | 为当前 query 检索、打分并 gate memories。 |
+| `POST /v2/users/{user_id}/turns/ingest` | 摄取用户 turn 或校验后的 LLM proposal payload；真实宿主先调用 provider，再提交候选。 |
+| `POST /v2/users/{user_id}/memory/query` | 为当前 query 检索、打分并 gate memories；可选候选 ID 仅收窄受控记录。 |
 | `POST /v2/users/{user_id}/prompt-context` | 编译 model-ready memory context。 |
 | `GET /v2/users/{user_id}/memory/review-queue` | 查看需要确认的 memories。 |
 | `POST /v2/users/{user_id}/memory/review-queue/{review_id}/resolve` | 按当前设置批准/拒绝；撤权时返回 409 并保留 pending。 |
@@ -364,3 +417,20 @@ print(context["assembled_prompt"])
 | `POST /v2/users/{user_id}/memory/{memory_id}/correct` | 纠正并退休冲突 records。 |
 | `POST /v2/users/{user_id}/memory/forget-all` | 带 audit trail 清空 memory。 |
 | `GET /v2/users/{user_id}/memory/audit/export` | 导出 records、settings、events 和 audit data。 |
+
+[真实评测报告](live-evaluation-results.md)记录了实际抽取和纠错失败；证据是原文子串不代表提案正确理解了原文。
+
+### 修复已有合成试验的记忆
+
+使用 `--resume-run /private/prior-run` 和同项目的合成场景，通过只读 SQLite backup 复制原库；保留设置和用户身份，不恢复近期对话。`initial-memory-export.json`、来源manifest/数据库hash与最终export区分旧错误修复和全新空库。`--rubric /private/frozen-rubric.md`记录另一个场景实际使用的验收文件hash，验收内容不传模型。
+
+同值状态重报会更新有效期。状态、一次任务和情境规则不晋升为稳定画像；简短偏好不再推成认知负荷，忙碌不再推成稳定画像，旧库中这些被移除映射的证据也不能重新授予画像资格。未带新标记的legacy payload维持原兼容契约，并未自动完成语义复核。撤源和自动依赖退役事务原子化，不代表整个ingest或模型生成流程原子化。
+
+
+### 实时宿主纠正语义（v6）
+
+语义复核区分获准读取的精确断言与渲染后的风格建议。显式撤回还须经过独立的矛盾判定，只给原始断言与当前用户原文，不传上一复核器的解释；两侧证据片段都须逐字核对。相容、缺失、重复、格式错误或不确定的判定不撤回旧来源。抽取失败不能发起撤回。项目事实的有效替换走正常受控 supersession，不能在验证新值前先退役旧事实。
+
+项目决定、范围和进展可使用 `retention=until_changed`：新信息替代前保持有效，不虚构到期时间。busy/available 仍是有到期时间的状态，只用于容量规划，不自动决定回答长度、顺序或节奏。独立旧 session runtime 的画像推断映射不属于本次实时宿主改动。
+
+固定枚举不能表达用户明确提出的正向新规则时，语义复核可以在 `contextual_` key 下保留当前原文规则，不能仅凭否定推出相反偏好。这仍是可能出错的模型判断，单元契约不证明语义正确。

@@ -8,4 +8,5 @@ venv/
 data/sessions/*.json
 data/*.sqlite3
 data/*.sqlite3-*
+data/live-runs/
 .DS_Store

@@ -1,4 +1,4 @@
-# EvolveMemory Next Development Spec v0.3
+# EvolveMemory Next Development Spec v0.4
 
 Updated **2026-11-16** after the user's direction correction. The earlier confirmed-only profile decision is superseded: AI should autonomously develop and revise its understanding from evidence, then adapt naturally within existing controls. The new U0 implementation slice passed local checks; implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). PR #15 results describe its earlier baseline.
 
@@ -26,7 +26,7 @@ user turns / app events / explicit corrections
     → host delivery + observed feedback
 ```
 
-The full architecture is a target. The present extractor uses rules and external `llm_payload`; it does not call a real provider. The host and broad stable/change/context reasoning remain incomplete. [Conversation protocol](conversation-memory-invocation-spec.md) defines the proposed read path and acceptance matrix.
+The full architecture is a target. A bounded DeepSeek host now extracts proposals, selects governed memories and generates real answers with request capture. Broad stable/change/context reasoning and longitudinal experience remain incomplete. See [live evaluation results](live-evaluation-results.md). [Conversation protocol](conversation-memory-invocation-spec.md) defines the proposed read path and acceptance matrix.
 
 ## Current decisions
 
@@ -42,14 +42,14 @@ The full architecture is a target. The present extractor uses rules and external
 | --- | --- | --- |
 | Storage and controls | [PR #15](https://github.com/2sao7sao/EvolveMemory/pull/15) merged at `8e3ab17`; 115 local tests, 72 pytest subtests, 11 deterministic suites, replay PASS; [hosted CI passed](https://github.com/2sao7sao/EvolveMemory/actions/runs/43906016401) | This historical slice included the now-superseded confirmed-only profile rule. Its counts do not validate the new automatic-understanding behavior. |
 | Automatic understanding | Implemented candidate: server-qualified `autonomous-v1` from ≥2 real turns; live evidence re-evaluation, bounded decay, finite current-query overrides | Local U0 checks pass. Optional `turn_id` supports host-managed retry identity; broad contextual understanding and response-history repetition control remain unproven. |
-| Extraction and retrieval | Rules, external proposal payload validation, deterministic hash embedding substitute | Real extraction/embedding providers and full-history coverage remain unverified. |
-| Conversation delivery | Context compilation and HTTP surfaces exist | Complete host orchestration, model-call capture, delivery receipts, and longitudinal experience remain pending. |
+| Extraction and retrieval | Real DeepSeek extraction and selection over up to 50 governed candidates, plus payload validation and deterministic hash scoring | Extraction can still confuse temporary instructions and lasting preferences; no real embedding provider or full-history coverage. |
+| Conversation delivery | Bounded host, actual request/response capture and live 24-turn project trials | No streaming/user delivery receipts, concurrent revocation guarantee, or longitudinal user acceptance. |
 
 ### Current local validation
 
 On 2026-11-16, implementation branch `feat/autonomous-understanding-20261116` passed **157 pytest tests + 101 subtests**, **157 unittest tests**, **11/11 deterministic eval suites** (`failures=[]`), and **adaptive replay PASS**, using an isolated temporary data directory without a provider call. Implementation and hosted Checks are tracked in [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16).
 
-The local U0 rules/API slice is complete. Experience acceptance U01–U08 remains open: tests of state, evidence, and compiled policy do not establish natural multi-turn answers. The next delivery step is **S1-a minimal host plus temporary context / S0-c**, followed by observed response and user-experience evaluation. Commands and evidence are recorded in [maintenance](maintenance.md).
+The local U0 rules/API slice is complete. Experience acceptance U01–U08 remains open: tests of state, evidence, and compiled policy do not establish natural multi-turn answers. The next delivery step is reliable state and retention extraction, followed by unseen multi-turn scenarios and user-experience evaluation. The bounded S1-a real-provider trial is documented in [live evaluation results](live-evaluation-results.md); full S0-c remains open. Commands and evidence are recorded in [maintenance](maintenance.md).
 
 ## Development stages
 
@@ -83,4 +83,4 @@ U01–U08 are requirements, not passed cases. Unit tests check state and policy;
 
 Track unsupported adaptation, correction residue, context confusion, repeated memory mentions, unnecessary questions, useful adaptation, and user-reported effort. Use the same tasks/model with recent-context-only and memory-enabled variants; include counterexamples and blinded review. Numerical quality and latency targets need baselines and agreed datasets before acceptance.
 
-The old numbered work-package list was a design sequence, not GitHub PR numbers. PR #12 remains the protocol draft, PR #13 repaired the read opt-out and migration clock, and PR #15 delivered controls/scope. Full S0-c, all dependent-record invalidation, concurrent revocation, S1 multi-turn delivery, real-provider quality, and production readiness are still open.
+The old numbered work-package list was a design sequence, not GitHub PR numbers. PR #12 remains the protocol draft, PR #13 repaired the read opt-out and migration clock, and PR #15 delivered controls/scope. Full S0-c, all dependent-record invalidation, concurrent revocation, wider S1 delivery controls, general real-provider quality, and production readiness are still open. The bounded host and observed project-continuation results are implemented, not a claim of complete long-term understanding.

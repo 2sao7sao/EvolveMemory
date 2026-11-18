@@ -6,9 +6,9 @@ Review date: **2026-11-16**. Original maintenance baseline: [`c628f00`](https://
 
 **Continue development toward evolving understanding.** On 2026-11-16 the user explicitly replaced the earlier confirmed-only profile decision. AI should infer and revise understanding over time, distinguish stable preferences from change and context, and adapt naturally without repeated confirmation or old-memory recitals. Project-task continuation is the first scenario; long-term collaboration and companionship are the vision.
 
-Same-project authorized reuse, source/scope/opt-out boundaries, per-event follow-up enablement, and conditional source hints remain. The current implementation uses rules and external `llm_payload`; it does not yet establish real-provider understanding or a complete multi-turn experience.
+Same-project authorized reuse, source/scope/opt-out boundaries, per-event follow-up enablement, and conditional source hints remain. The current implementation includes a real DeepSeek provider and bounded conversation host. The live project-continuation results and remaining understanding failures are tracked separately from rule/API tests in [live evaluation results](live-evaluation-results.md).
 
-## Current automatic-understanding revision — local U0 checks passed
+## Historical PR #16 automatic-understanding revision — local U0 checks passed
 
 This revision replaces PR #15's universal profile review-marker requirement with evidence-backed automatic accumulation and relevant, natural adaptation. Multiple independent, available source turns are required; weak evidence stays tentative or unused rather than triggering default confirmation. Explicit corrections and counter-evidence should revise earlier inferences, and settings/source checks remain effective.
 
@@ -100,14 +100,37 @@ Evidence was captured in `reports/EvolveMemory-controls-validation/` in the main
 
 These results apply to this slice’s code and reproducible tests; remote Checks and merge status belong to the associated implementation PR. Local results do not complete S0-c, concurrent revocation, full dependency invalidation, S1 multi-turn delivery, or real-provider validation. The concrete interface is documented in [English](runtime-reference.md) and [Chinese](runtime-reference.zh-CN.md).
 
+## Current live conversation slice — 2026-11-16
+
+The host connects real DeepSeek extraction, governed v2 ingestion, candidate selection, prompt compilation, and answer generation. Each model stage sees a gate-safe projection; final source notes come from the same prompt-context snapshot, rather than an earlier query. Missing retention fails closed. The runnable fixture has 24 synthetic user turns across three sessions; both arms retain only two recent pairs. User text is synthetic, assistant text is actual API output, and no evaluation expectations enter model inputs.
+
+Local checks on this slice, reproduced with the commands below and recorded per command, result, and evidence boundary. These are implementation checks, not user acceptance. Frozen-script real runs, failures, usage, and selected raw replies are in [live evaluation results](live-evaluation-results.md). Full private run artifacts remain in the maintenance workspace `reports/EvolveMemory-live-validation/`; they are not repository-hosted evidence.
+
+### Live slice local validation
+
+Recomputed on this branch with Python 3.13 and `requirements.txt`. Running the commands again is what establishes these numbers; they are not a quality score.
+
+| Command | Result | Evidence boundary |
+| --- | --- | --- |
+| `python3 -m pytest -q --tb=short` | **263 passed, 249 subtests passed** | Local unit, persistence, and HTTP TestClient regressions; subtests are not additional test methods. |
+| `python3 -m unittest discover -s tests -p 'test_*.py'` | **263 passed** | Same suite through the runner used by CI. |
+| `python3 -m evals.runner --suite all` | **11 suites**, `failures=[]` | Deterministic seed evaluations without a provider; passing them does not establish real-model understanding. |
+| `python3 examples/replay_adaptive_memory.py` | **PASS**, `gate_eval: 8/8` | Synthetic replay only; not a real-model or complete host conversation. |
+| `python3 examples/run_live_conversation.py --scenario examples/scenarios/project_continuation_zh.json --api-key-file <key-file> --output <private-dir> --model deepseek-flash --max-calls 150 --max-cost-usd 2` | 48 answers / 96 calls; estimated **$0.093850** for the final run | Real billed provider calls against a synthetic user script. Not held-out validation, blind review, or owner acceptance; raw dialogue and SQLite stay in `--output`. |
+| `python3 examples/run_live_conversation.py --scenario examples/scenarios/project_continuation_zh.json --api-key-file <key-file> --output <private-dir> --model deepseek-flash --max-calls 150 --max-cost-usd 2` | Re-run at `c67dfaa`: 48 answers / 121 calls; estimated **$0.127819** | Real billed calls after the polarity fix: no profile evidence created, T24/T19 recovery holds, one project fact over-rejected. Same boundary as the row above. |
+
+The live command needs a provider key stored outside the repository and spends real credit; it is the only row here that calls a model. The frozen-script run was executed on code `a1d94e3`, where the suite reported 205 tests / 165 subtests. The deterministic counts above belong to the current branch head and are the ones a reviewer reproduces today.
+
+The first complete run failed to recover the old decision. A subsequent run recovered it after retrieval and source fixes, while exposing remaining state extraction and temporary-preference problems. The final publication candidate was rerun after fixing provider projection boundaries. No run is discarded or relabeled as a held-out test.
+
 ## Next milestones
 
 | Priority | Work | Acceptance / gap |
 | --- | --- | --- |
 | P0 / U0 | Automatic-understanding implementation and validation | 157 tests / 101 subtests, 157 unittest tests, 11 suites, replay PASS; implementation and hosted Checks: [PR #16](https://github.com/2sao7sao/EvolveMemory/pull/16). |
-| Next / S1-a + S0-c | Minimal host delivery and temporary context | Capture actual model-call inputs across turns; current exceptions do not overwrite lasting preferences. |
-| P1 / Experience | First project-task continuation with natural adaptation | User corrections change the next answer; the assistant avoids irrelevant recall and repetitive “I remember” messages. |
-| P2 / S2–S4 | Lasting understanding and a real provider | Stable/change/context cases, longitudinal user feedback, helpfulness, correction effort, latency, and cost. Rules or payload validation alone are insufficient. |
+| S1-a delivered / S0-c partial | Bounded real-provider host with captured requests | Finish reliable temporary-vs-lasting extraction and full current-materials-only/no-write host controls. |
+| P1 / Experience | State updates and calibrated adaptation | Fix typed state extraction, one-off preference pollution, and unnecessary confirmation; validate unseen scenarios and user feedback. |
+| P2 / S2–S4 | Lasting understanding beyond the initial real-provider trial | Stable/change/context cases, autonomous profile formation, repeated sampling and longitudinal user feedback remain open. |
 | P2 | Complete lifecycle and deployment work | Full dependency invalidation, concurrent revocation, source-history coverage, event receipts, authentication, and production controls. |
 | P2 | Restore Pages configuration | Verify a successful deployment and live URL before advertising a hosted product page. |
 

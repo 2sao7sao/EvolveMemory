@@ -977,7 +977,7 @@ class MemorySystemTest(unittest.TestCase):
 
         self.assertEqual(policy.example_density, "high")
         self.assertEqual(policy.challenge_level, "high")
-        self.assertEqual(policy.pace, "fast")
+        self.assertEqual(policy.pace, "slow")
 
     def test_context_compiler_keeps_new_profile_guidance_policy_only(self) -> None:
         timestamp = datetime(2026, 5, 1, 9, 0, tzinfo=self.tz)
