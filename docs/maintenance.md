@@ -104,7 +104,21 @@ These results apply to this slice’s code and reproducible tests; remote Checks
 
 The host connects real DeepSeek extraction, governed v2 ingestion, candidate selection, prompt compilation, and answer generation. Each model stage sees a gate-safe projection; final source notes come from the same prompt-context snapshot, rather than an earlier query. Missing retention fails closed. The runnable fixture has 24 synthetic user turns across three sessions; both arms retain only two recent pairs. User text is synthetic, assistant text is actual API output, and no evaluation expectations enter model inputs.
 
-Local checks on this slice: **205 pytest tests + 165 subtests**, **205 unittest tests**, **11 deterministic suites**, and adaptive replay PASS. These are implementation checks, not user acceptance. Frozen-script real runs, failures, usage, and selected raw replies are in [live evaluation results](live-evaluation-results.md). Full private run artifacts remain in the maintenance workspace `reports/EvolveMemory-live-validation/`; they are not repository-hosted evidence.
+Local checks on this slice, reproduced with the commands below and recorded per command, result, and evidence boundary. These are implementation checks, not user acceptance. Frozen-script real runs, failures, usage, and selected raw replies are in [live evaluation results](live-evaluation-results.md). Full private run artifacts remain in the maintenance workspace `reports/EvolveMemory-live-validation/`; they are not repository-hosted evidence.
+
+### Live slice local validation
+
+Recomputed on this branch at `ed0f6b5` with Python 3.13 and `requirements.txt`. Running the commands again is what establishes these numbers; they are not a quality score.
+
+| Command | Result | Evidence boundary |
+| --- | --- | --- |
+| `python3 -m pytest -q --tb=short` | **257 passed, 249 subtests passed** | Local unit, persistence, and HTTP TestClient regressions; subtests are not additional test methods. |
+| `python3 -m unittest discover -s tests -p 'test_*.py'` | **257 passed** | Same suite through the runner used by CI. |
+| `python3 -m evals.runner --suite all` | **11 suites**, `failures=[]` | Deterministic seed evaluations without a provider; passing them does not establish real-model understanding. |
+| `python3 examples/replay_adaptive_memory.py` | **PASS**, `gate_eval: 8/8` | Synthetic replay only; not a real-model or complete host conversation. |
+| `python3 examples/run_live_conversation.py --scenario examples/scenarios/project_continuation_zh.json --api-key-file <key-file> --output <private-dir> --model deepseek-flash --max-calls 150 --max-cost-usd 2` | 48 answers / 96 calls; estimated **$0.093850** for the final run | Real billed provider calls against a synthetic user script. Not held-out validation, blind review, or owner acceptance; raw dialogue and SQLite stay in `--output`. |
+
+The live command needs a provider key stored outside the repository and spends real credit; it is the only row here that calls a model. The frozen-script run was executed on code `a1d94e3`, where the suite reported 205 tests / 165 subtests. The deterministic counts above belong to the current branch head and are the ones a reviewer reproduces today.
 
 The first complete run failed to recover the old decision. A subsequent run recovered it after retrieval and source fixes, while exposing remaining state extraction and temporary-preference problems. The final publication candidate was rerun after fixing provider projection boundaries. No run is discarded or relabeled as a held-out test.
 

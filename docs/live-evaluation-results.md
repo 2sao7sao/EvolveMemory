@@ -79,3 +79,17 @@ Final code passed **205 pytest tests + 165 subtests**, **205 unittest tests**, *
 4. Then use unseen project scripts, repeated samples and owner feedback to evaluate naturalness, redundant questions and repeated anecdotes. Keep ordinary supported adaptation autonomous; do not fix these errors by requiring confirmation of every profile.
 
 PR #17 remains draft because these experience failures are material. The broader protocol still lacks complete current-materials-only host controls, full source-history search, atomic concurrent revocation, delivery receipts, production authentication and longitudinal validation. This experiment neither closes #14 nor marks U01–U08 accepted.
+
+## Reproduce
+
+Every number in this document comes from repository commands; the per-command results and evidence boundaries are tabulated in [maintenance](maintenance.md#live-slice-local-validation).
+
+| Command | What it reproduces |
+| --- | --- |
+| `python3 -m pytest -q --tb=short` | Local unit, persistence, and HTTP suite: 257 tests / 249 subtests at the current branch head `ed0f6b5`, 205 / 165 on the live-tested `a1d94e3`. |
+| `python3 -m unittest discover -s tests -p 'test_*.py'` | The same suite through the CI-style runner. |
+| `python3 -m evals.runner --suite all` | Deterministic seed evaluations without a provider. |
+| `python3 examples/replay_adaptive_memory.py` | Synthetic adaptive replay (`gate_eval: 8/8`). |
+| `python3 examples/run_live_conversation.py --scenario examples/scenarios/project_continuation_zh.json --api-key-file <key-file> --output <private-dir> --model deepseek-flash --max-calls 150 --max-cost-usd 2` | The frozen-script live run with real billed provider calls; raw dialogue and SQLite stay in `--output`, and the script is not a held-out test. |
+
+The live row is the only one that calls a model, needs a key stored outside the repository, and spends real credit.
